@@ -3,6 +3,235 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Ball Arena Fight</title>
+<style>
+html,body{
+  margin:0;
+  background:#020204;
+  overflow:hidden;
+  font-family:Arial,Helvetica,sans-serif;
+}
+canvas{display:block}
+
+/* HUD */
+#hud{
+  position:fixed;
+  top:10px;
+  left:0;right:0;
+  display:flex;
+  justify-content:space-between;
+  padding:0 20px;
+  font-size:18px;
+}
+.orange{color:#ff9f00}
+.blue{color:#00baff}
+
+/* Overlay */
+.overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.75);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+  color:#fff;
+  font-size:28px;
+  z-index:10;
+}
+.hidden{display:none}
+.small{font-size:18px;opacity:.7}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="orange">ORANGE <span id="sO">0</span></div>
+  <div class="blue">BLUE <span id="sB">0</span></div>
+</div>
+
+<div id="start" class="overlay">
+  <div>ARENA FIGHT</div>
+  <div class="small">Tap to start</div>
+</div>
+
+<div id="end" class="overlay hidden">
+  <div id="winner"></div>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+/* ================= SETUP ================= */
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
+resize();addEventListener("resize",resize);
+
+/* Arena */
+const ARENA_SIZE=260;
+
+/* Audio */
+let audioCtx,audioReady=false;
+function initAudio(){
+  audioCtx=new (window.Audios<AudioContext||webkitAudioContext)();
+  audioReady=true;
+}
+function play(freq,dur,gain){
+  if(!audioReady) return;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.type="triangle";
+  o.frequency.value=freq;
+  g.gain.setValueAtTime(0,audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(gain,audioCtx.currentTime+.01);
+  g.gain.exponentialRampToValueAtTime(.0001,audioCtx.currentTime+dur);
+  o.connect(g);g.connect(audioCtx.destination);
+  o.start();o.stop(audioCtx.currentTime+dur);
+}
+const hit=()=>play(300,.05,.1);
+const kill=()=>play(140,.15,.2);
+
+/* ================= STATE ================= */
+let balls=[], weapon=null;
+let scoreO=0, scoreB=0;
+let started=false;
+
+/* ================= INIT ================= */
+function reset(){
+  balls=[
+    {x:-60,y:0,vx:2,vy:1.6,color:"orange",weapon:null,weaponTime:0},
+    {x:60,y:0,vx:-2,vy:-1.6,color:"blue",weapon:null,weaponTime:0}
+  ];
+  weapon=null;
+}
+
+function spawnWeapon(){
+  const types=["knife","saw","gun"];
+  weapon={
+    type:types[Math.floor(Math.random()*3)],
+    x:(Math.random()*160-80),
+    y:(Math.random()*160-80),
+    time:360
+  };
+}
+
+/* ================= UI ================= */
+const sO=document.getElementById("sO");
+const sB=document.getElementById("sB");
+function updateScore(){
+  sO.textContent=scoreO;
+  sB.textContent=scoreB;
+}
+
+/* ================= START ================= */
+document.getElementById("start").onclick=()=>{
+  initAudio();
+  reset();
+  started=true;
+  document.getElementById("start").classList.add("hidden");
+};
+
+/* ================= UPDATE ================= */
+function update(){
+  if(!started) return;
+
+  /* weapon spawn */
+  if(!weapon && Math.random()<.01) spawnWeapon();
+  if(weapon){weapon.time--; if(weapon.time<=0) weapon=null;}
+
+  for(const b of balls){
+    b.x+=b.vx;
+    b.y+=b.vy;
+
+    /* wall */
+    if(Math.abs(b.x)>ARENA_SIZE/2) b.vx*=-1;
+    if(Math.abs(b.y)>ARENA_SIZE/2) b.vy*=-1;
+
+    /* weapon timer */
+    if(b.weapon){
+      b.weaponTime--;
+      if(b.weaponTime<=0) b.weapon=null;
+    }
+  }
+
+  /* weapon pickup */
+  if(weapon){
+    for(const b of balls){
+      if(Math.hypot(b.x-weapon.x,b.y-weapon.y)<12){
+        b.weapon=weapon.type;
+        b.weaponTime=360;
+        weapon=null;
+        hit();
+      }
+    }
+  }
+
+  /* combat */
+  const a=balls[0], b=balls[1];
+  if(Math.hypot(a.x-b.x,a.y-b.y)<10){
+    if(a.weapon){scoreO++; reset(); kill();}
+    else if(b.weapon){scoreB++; reset(); kill();}
+    updateScore();
+  }
+
+  /* win */
+  if(scoreO>=6||scoreB>=6){
+    document.getElementById("winner").textContent=
+      scoreO>scoreB?"ORANGE WINS":"BLUE WINS";
+    document.getElementById("end").classList.remove("hidden");
+    started=false;
+  }
+}
+
+/* ================= DRAW ================= */
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.translate(canvas.width/2,canvas.height/2);
+
+  /* arena */
+  ctx.strokeStyle="#fff3";
+  ctx.strokeRect(-ARENA_SIZE/2,-ARENA_SIZE/2,ARENA_SIZE,ARENA_SIZE);
+
+  /* weapon */
+  if(weapon){
+    ctx.fillStyle="#fff";
+    ctx.beginPath();
+    ctx.arc(weapon.x,weapon.y,6,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  /* balls */
+  for(const b of balls){
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,6,0,Math.PI*2);
+    ctx.fillStyle=b.color==="orange"?"#ff9f00":"#00baff";
+    ctx.fill();
+
+    if(b.weapon){
+      ctx.strokeStyle="#fff";
+      ctx.strokeRect(b.x-10,b.y-10,20,20);
+    }
+  }
+
+  ctx.setTransform(1,0,0,1,0,0);
+}
+
+/* ================= LOOP ================= */
+(function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
+
+<!-- <!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Escape Rings – Final Stable</title>
 <style>
 html,body{
@@ -315,326 +544,4 @@ function draw(){
 })();
 </script>
 </body>
-</html>
-
-<!-- <!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Escape Rings – Rings Only Update</title>
-<style>
-html,body{
-  margin:0;
-  background:#020204;
-  overflow:hidden;
-  font-family:Arial,Helvetica,sans-serif;
-}
-canvas{display:block}
-#top{
-  position:fixed;
-  top:18px;
-  left:0;right:0;
-  text-align:center;
-  color:#ffffffcc;
-  font-size:18px;
-  pointer-events:none;
-}
-#start{
-  position:fixed;
-  inset:0;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  background:#020204;
-  color:#fff;
-  font-size:22px;
-  letter-spacing:1px;
-  z-index:10;
-}
-</style>
-</head>
-<body>
-
-<div id="top">Only one path works</div>
-<div id="start">TAP TO START</div>
-<canvas id="c"></canvas>
-
-<script>
-/* ================= SETUP ================= */
-const canvas = document.getElementById("c");
-const ctx = canvas.getContext("2d");
-function resize(){
-  canvas.width = innerWidth;
-  canvas.height = innerHeight;
-}
-resize();
-addEventListener("resize", resize);
-
-const CX = () => canvas.width/2;
-const CY = () => canvas.height/2;
-
-/* ================= AUDIO ================= */
-let audioCtx;
-let audioReady = false;
-let pitchLevel = 0;
-let cameraPulse = 0;
-
-function initAudio(){
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  audioReady = true;
-}
-
-function play(freq, dur, gain){
-  if(!audioReady) return;
-
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-
-  o.type = "triangle"; // ⬅️ plus doux que sine
-  o.frequency.value = freq;
-
-  g.gain.setValueAtTime(0, audioCtx.currentTime);
-  g.gain.linearRampToValueAtTime(gain, audioCtx.currentTime + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-
-  o.connect(g);
-  g.connect(audioCtx.destination);
-
-  o.start();
-  o.stop(audioCtx.currentTime + dur);
-}
-
-// function play(freq, dur, gain){
-//   if(!audioReady) return;
-
-//   const o = audioCtx.createOscillator();
-//   const g = audioCtx.createGain();
-//   const f = audioCtx.createBiquadFilter();
-
-//   o.type = "sine";
-//   o.frequency.value = freq;
-
-//   f.type = "highpass";
-//   f.frequency.value = 800; // ⬅️ effet verre
-
-//   g.gain.setValueAtTime(gain, audioCtx.currentTime);
-//   g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-
-//   o.connect(f);
-//   f.connect(g);
-//   g.connect(audioCtx.destination);
-
-//   o.start();
-//   o.stop(audioCtx.currentTime + dur);
-// }
-  
-  
-const bounceSound = () => play(220, 0.04, 0.08);
-const hitSound    = () => play(300, 0.04, 0.1);
-const exitSound   = () => {
-  play(520 + pitchLevel*120, 0.09, 0.18);
-  pitchLevel++;
-  cameraPulse = 1;
-};
-
-/* ================= SETTINGS ================= */
-const RING_COUNT = 13; // ⬅️ plus d’anneaux
-const GAP_SIZE = Math.PI / 7;
-const RING_THICKNESS = 4;
-
-/* Mobile scaling */
-const SAFE_MARGIN = -45;
-function getMaxRadius(){
-  return Math.min(canvas.width, canvas.height) / 2 - SAFE_MARGIN;
-}
-
-/* Balls (INCHANGÉ) */
-const BALL_RADIUS = 3.5;
-const BALL_SPEED = 6.2;
-const BALL_COUNT = 2;
-
-/* Rotation */
-const BASE_ROT_SPEED = 0.0025;
-
-/* Randomness */
-const BOUNCE_RANDOM_ANGLE = Math.PI / 18;
-
-/* ================= STATE ================= */
-let rings = [];
-let balls = [];
-let started = false;
-
-/* ================= INIT ================= */
-function reset(){
-  rings = [];
-  balls = [];
-  pitchLevel = 0;
-
-  const maxR = getMaxRadius();
-  const spacing = maxR / (RING_COUNT + 8); // ⬅️ anneaux plus rapprochés
-
-  for(let i=0;i<RING_COUNT;i++){
-    rings.push({
-      r: spacing * (i + 3),
-      gap: Math.random() * Math.PI * 2,
-      rot: BASE_ROT_SPEED * (i + 1)
-    });
-  }
-
-  /* Balls — EXACTEMENT COMME TON CODE */
-  for(let i=0;i<BALL_COUNT;i++){
-    const a = Math.random() * Math.PI * 2;
-    balls.push({
-      x: CX() + Math.cos(a) * 30,
-      y: CY() + Math.sin(a) * 30,
-      vx: Math.cos(a + i) * BALL_SPEED,
-      vy: Math.sin(a + i) * BALL_SPEED,
-      color: i === 0 ? "#ff9f00" : "#00baff"
-    });
-  }
-}
-
-/* ================= START ================= */
-document.getElementById("start").addEventListener("click", ()=>{
-  initAudio();
-  reset();
-  started = true;
-  document.getElementById("start").style.display = "none";
-});
-
-/* ================= HELPERS ================= */
-const dist = (ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
-const angle = (x,y)=>Math.atan2(y-CY(), x-CX());
-function norm(a){
-  while(a<-Math.PI) a+=Math.PI*2;
-  while(a> Math.PI) a-=Math.PI*2;
-  return a;
-}
-
-/* ================= UPDATE ================= */
-function update(){
-  if(!started) return;
-
-  for(const b of balls){
-    b.x += b.vx;
-    b.y += b.vy;
-  }
-
-  /* Ball ↔ Ball (INCHANGÉ) */
-  if(balls.length === 2){
-    const a = balls[0], b = balls[1];
-    const d = dist(a.x,a.y,b.x,b.y);
-    if(d < BALL_RADIUS*2){
-      const nx = (b.x-a.x)/d;
-      const ny = (b.y-a.y)/d;
-      const p = (a.vx*nx + a.vy*ny - b.vx*nx - b.vy*ny);
-      a.vx -= p*nx; a.vy -= p*ny;
-      b.vx += p*nx; b.vy += p*ny;
-      hitSound();
-    }
-  }
-
-  /* Rings */
-  for(let i=rings.length-1;i>=0;i--){
-    const ring = rings[i];
-    ring.gap += ring.rot;
-
-    for(const b of balls){
-      const d = dist(b.x,b.y,CX(),CY());
-      const a = angle(b.x,b.y);
-
-      if(Math.abs(d - ring.r) < BALL_RADIUS + RING_THICKNESS){
-        const diff = Math.abs(norm(a - ring.gap));
-
-        if(diff > GAP_SIZE/2){
-          const nx = (b.x-CX())/d;
-          const ny = (b.y-CY())/d;
-          const dot = b.vx*nx + b.vy*ny;
-          const ang = Math.atan2(b.vy - 2*dot*ny, b.vx - 2*dot*nx);
-          const rand = (Math.random()*2 - 1) * BOUNCE_RANDOM_ANGLE;
-          b.vx = Math.cos(ang + rand) * BALL_SPEED;
-          b.vy = Math.sin(ang + rand) * BALL_SPEED;
-          bounceSound();
-        } else {
-          exitSound();
-          rings.splice(i,1);
-          return;
-        }
-      }
-    }
-  }
-
-  if(rings.length === 0){
-    setTimeout(reset, 1200);
-  }
-
-  cameraPulse *= 0.9;
-}
-
-/* ================= DRAW ================= */
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  const pulse = 1 + cameraPulse * 0.05;
-  ctx.save();
-  ctx.translate(CX(), CY());
-  ctx.scale(pulse, pulse);
-  ctx.translate(-CX(), -CY());
-
-  const bg = ctx.createRadialGradient(CX(),CY(),60,CX(),CY(),canvas.width);
-  bg.addColorStop(0,"#0b0d18");
-  bg.addColorStop(1,"#020204");
-  ctx.fillStyle = bg;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  /* Rings — NOUVELLE COULEUR */
-  ctx.lineWidth = RING_THICKNESS;
-  ctx.shadowBlur = 14;
-
-  for(let i=0;i<rings.length;i++){
-    const ring = rings[i];
-    const hue = 280 + i*6; // violet → rose
-    ctx.strokeStyle = `hsl(${hue},90%,65%)`;
-    ctx.shadowColor = ctx.strokeStyle;
-
-    ctx.beginPath();
-    ctx.arc(
-      CX(), CY(),
-      ring.r,
-      ring.gap + GAP_SIZE/2,
-      ring.gap + Math.PI*2 - GAP_SIZE/2
-    );
-    ctx.stroke();
-  }
-
-  ctx.shadowBlur = 0;
-
-  /* Balls (INCHANGÉ) */
-  for(const b of balls){
-    ctx.beginPath();
-    ctx.arc(b.x,b.y,BALL_RADIUS,0,Math.PI*2);
-    ctx.fillStyle = b.color;
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.arc(b.x,b.y,BALL_RADIUS*2.3,0,Math.PI*2);
-    ctx.strokeStyle = b.color + "66";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
-
-/* ================= LOOP ================= */
-function loop(){
-  update();
-  draw();
-  requestAnimationFrame(loop);
-}
-loop();
-</script>
-</body>
-</html>
- -->
+</html> -->
