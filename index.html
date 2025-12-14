@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Escape Rings – Versus</title>
+<title>Escape Rings – Final Stable</title>
 <style>
 html,body{
   margin:0;
@@ -21,18 +21,17 @@ canvas{display:block}
   display:flex;
   justify-content:space-between;
   padding:0 20px;
-  color:#fff;
   font-size:18px;
   pointer-events:none;
 }
 .orange{color:#ff9f00}
 .blue{color:#00baff}
 
-/* Overlay */
+/* Overlays */
 .overlay{
   position:fixed;
   inset:0;
-  background:rgba(0,0,0,0.75);
+  background:rgba(0,0,0,.75);
   display:flex;
   align-items:center;
   justify-content:center;
@@ -76,26 +75,41 @@ const CX=()=>canvas.width/2;
 const CY=()=>canvas.height/2;
 
 /* ================= AUDIO ================= */
-let audioCtx,audioReady=false,pitchLevel=0,cameraPulse=0;
+let audioCtx, audioReady=false, pitchLevel=0, cameraPulse=0;
+
 function initAudio(){
   audioCtx=new (window.AudioContext||window.webkitAudioContext)();
   audioReady=true;
 }
-function play(freq,dur,g){
-  if(!audioReady)return;
-  const o=audioCtx.createOscillator();
-  const g2=audioCtx.createGain();
-  o.type="triangle";
-  o.frequency.value=freq;
-  g2.gain.setValueAtTime(0,audioCtx.currentTime);
-  g2.gain.linearRampToValueAtTime(g,audioCtx.currentTime+.01);
-  g2.gain.exponentialRampToValueAtTime(.0001,audioCtx.currentTime+dur);
-  o.connect(g2);g2.connect(audioCtx.destination);
-  o.start();o.stop(audioCtx.currentTime+dur);
+
+/* ✅ SON CHOISI (NE PAS MODIFIER) */
+function play(freq, dur, gain){
+  if(!audioReady) return;
+
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+
+  o.type = "triangle";
+  o.frequency.value = freq;
+
+  g.gain.setValueAtTime(0, audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(gain, audioCtx.currentTime + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+
+  o.connect(g);
+  g.connect(audioCtx.destination);
+
+  o.start();
+  o.stop(audioCtx.currentTime + dur);
 }
+
 const bounceSound=()=>play(220,.04,.08);
 const hitSound=()=>play(300,.04,.1);
-const exitSound=()=>{play(520+pitchLevel*120,.09,.18);pitchLevel++;cameraPulse=1};
+const exitSound=()=>{
+  play(520+pitchLevel*120,.09,.18);
+  pitchLevel++;
+  cameraPulse=1;
+};
 
 /* ================= SETTINGS ================= */
 const RING_COUNT=13;
@@ -106,24 +120,26 @@ const SAFE_MARGIN=-45;
 const BALL_RADIUS=3.5;
 const BALL_SPEED=6.2;
 const BALL_COUNT=2;
+
 const BASE_ROT_SPEED=.0025;
 const BOUNCE_RANDOM_ANGLE=Math.PI/18;
 
 function getMaxRadius(){
-  return Math.min(canvas.width,canvas.height)/2-SAFE_MARGIN;
+  return Math.min(canvas.width,canvas.height)/2 - SAFE_MARGIN;
 }
 
 /* ================= STATE ================= */
-let rings=[],balls=[],started=false;
-let scoreO=0,scoreB=0;
+let rings=[], balls=[], started=false;
+let scoreO=0, scoreB=0;
 
 /* ================= INIT ================= */
 function reset(){
-  rings=[];balls=[];pitchLevel=0;
-  scoreO=0;scoreB=0;
+  rings=[]; balls=[]; pitchLevel=0;
+  scoreO=0; scoreB=0;
   updateScore();
 
   const spacing=getMaxRadius()/(RING_COUNT+8);
+
   for(let i=0;i<RING_COUNT;i++){
     rings.push({
       r:spacing*(i+3),
@@ -139,7 +155,8 @@ function reset(){
       y:CY()+Math.sin(a)*30,
       vx:Math.cos(a+i)*BALL_SPEED,
       vy:Math.sin(a+i)*BALL_SPEED,
-      color:i===0?"orange":"blue"
+      color:i===0?"orange":"blue",
+      prevD:0 // 🔑 FIX TUNNELING
     });
   }
 }
@@ -163,26 +180,40 @@ document.getElementById("start").onclick=()=>{
 /* ================= HELPERS ================= */
 const dist=(ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
 const angle=(x,y)=>Math.atan2(y-CY(),x-CX());
-const norm=a=>(a<-Math.PI?a+Math.PI*2:a>Math.PI?a-Math.PI*2:a);
+function norm(a){
+  while(a<-Math.PI)a+=Math.PI*2;
+  while(a>Math.PI)a-=Math.PI*2;
+  return a;
+}
 
 /* ================= UPDATE ================= */
 function update(){
-  if(!started)return;
+  if(!started) return;
 
-  for(const b of balls){b.x+=b.vx;b.y+=b.vy}
+  /* mémorise distance précédente (FIX) */
+  for(const b of balls){
+    b.prevD = dist(b.x,b.y,CX(),CY());
+  }
 
+  for(const b of balls){
+    b.x+=b.vx;
+    b.y+=b.vy;
+  }
+
+  /* Ball ↔ Ball */
   if(balls.length===2){
-    const a=balls[0],b=balls[1];
+    const a=balls[0], b=balls[1];
     const d=dist(a.x,a.y,b.x,b.y);
     if(d<BALL_RADIUS*2){
-      const nx=(b.x-a.x)/d,ny=(b.y-a.y)/d;
+      const nx=(b.x-a.x)/d, ny=(b.y-a.y)/d;
       const p=(a.vx*nx+a.vy*ny-b.vx*nx-b.vy*ny);
-      a.vx-=p*nx;a.vy-=p*ny;
-      b.vx+=p*nx;b.vy+=p*ny;
+      a.vx-=p*nx; a.vy-=p*ny;
+      b.vx+=p*nx; b.vy+=p*ny;
       hitSound();
     }
   }
 
+  /* Rings */
   for(let i=rings.length-1;i>=0;i--){
     const ring=rings[i];
     ring.gap+=ring.rot;
@@ -190,20 +221,24 @@ function update(){
     for(const b of balls){
       const d=dist(b.x,b.y,CX(),CY());
       const a=angle(b.x,b.y);
+      const diff=Math.abs(norm(a-ring.gap));
 
-      if(Math.abs(d-ring.r)<BALL_RADIUS+RING_THICKNESS){
-        const diff=Math.abs(norm(a-ring.gap));
+      const wasInside=b.prevD<ring.r;
+      const isOutside=d>ring.r;
 
-        if(diff<GAP_SIZE/2){
-          exitSound();
-          if(b.color==="orange")scoreO++;
-          else scoreB++;
-          updateScore();
-          rings.splice(i,1);
-          return;
-        }
+      /* ✅ PASSAGE VALIDE (même si on saute le rayon) */
+      if(wasInside && isOutside && diff<GAP_SIZE/2){
+        exitSound();
+        if(b.color==="orange") scoreO++;
+        else scoreB++;
+        updateScore();
+        rings.splice(i,1);
+        return;
+      }
 
-        const nx=(b.x-CX())/d,ny=(b.y-CY())/d;
+      /* Collision classique */
+      if(Math.abs(d-ring.r)<BALL_RADIUS+RING_THICKNESS && diff>GAP_SIZE/2){
+        const nx=(b.x-CX())/d, ny=(b.y-CY())/d;
         const dot=b.vx*nx+b.vy*ny;
         const ang=Math.atan2(b.vy-2*dot*ny,b.vx-2*dot*nx);
         const rand=(Math.random()*2-1)*BOUNCE_RANDOM_ANGLE;
@@ -214,13 +249,18 @@ function update(){
     }
   }
 
+  /* Fin */
   if(rings.length===0){
     const end=document.getElementById("end");
     const w=document.getElementById("winner");
-    w.textContent=scoreO>scoreB?"ORANGE WINS":scoreB>scoreO?"BLUE WINS":"DRAW";
-    w.className=scoreO>=scoreB?"orange":"blue";
+    w.textContent = scoreO>scoreB ? "ORANGE WINS" :
+                    scoreB>scoreO ? "BLUE WINS" : "DRAW";
+    w.className = scoreO>=scoreB ? "orange" : "blue";
     end.classList.remove("hidden");
-    setTimeout(()=>{end.classList.add("hidden");reset()},2000);
+    setTimeout(()=>{
+      end.classList.add("hidden");
+      reset();
+    },2000);
   }
 
   cameraPulse*=.9;
@@ -235,18 +275,25 @@ function draw(){
   ctx.translate(-CX(),-CY());
 
   const bg=ctx.createRadialGradient(CX(),CY(),60,CX(),CY(),canvas.width);
-  bg.addColorStop(0,"#0b0d18");bg.addColorStop(1,"#020204");
-  ctx.fillStyle=bg;ctx.fillRect(0,0,canvas.width,canvas.height);
+  bg.addColorStop(0,"#0b0d18");
+  bg.addColorStop(1,"#020204");
+  ctx.fillStyle=bg;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  ctx.lineWidth=RING_THICKNESS;ctx.shadowBlur=14;
+  ctx.lineWidth=RING_THICKNESS;
+  ctx.shadowBlur=14;
+
   for(let i=0;i<rings.length;i++){
     const hue=280+i*6;
     ctx.strokeStyle=`hsl(${hue},90%,65%)`;
     ctx.shadowColor=ctx.strokeStyle;
     ctx.beginPath();
-    ctx.arc(CX(),CY(),rings[i].r,
+    ctx.arc(
+      CX(),CY(),
+      rings[i].r,
       rings[i].gap+GAP_SIZE/2,
-      rings[i].gap+Math.PI*2-GAP_SIZE/2);
+      rings[i].gap+Math.PI*2-GAP_SIZE/2
+    );
     ctx.stroke();
   }
   ctx.shadowBlur=0;
@@ -261,7 +308,11 @@ function draw(){
 }
 
 /* ================= LOOP ================= */
-(function loop(){update();draw();requestAnimationFrame(loop)})();
+(function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+})();
 </script>
 </body>
 </html>
