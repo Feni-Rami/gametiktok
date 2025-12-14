@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Ball Arena – Final Physics</title>
+<title>Ball Arena – Knife Fixed</title>
 <style>
 html,body{
   margin:0;
@@ -36,8 +36,6 @@ canvas{display:block}
   font-weight:700;
   pointer-events:none;
 }
-.score{transition:.2s}
-.score.pulse{transform:scale(1.3);filter:drop-shadow(0 0 14px currentColor)}
 .orange{color:#ffb000}
 .blue{color:#00c8ff}
 </style>
@@ -47,8 +45,8 @@ canvas{display:block}
 <div id="audioUnlock">TAP TO ENABLE SOUND</div>
 
 <div id="hud">
-  <div class="orange score">ORANGE <span id="sO">0</span></div>
-  <div class="blue score">BLUE <span id="sB">0</span></div>
+  <div class="orange">ORANGE <span id="sO">0</span></div>
+  <div class="blue">BLUE <span id="sB">0</span></div>
 </div>
 
 <canvas id="c"></canvas>
@@ -82,7 +80,6 @@ function play(f,d,g){
   const now=audioCtx.currentTime;
   if(now-lastSound<0.035) return;
   lastSound=now;
-
   const o=audioCtx.createOscillator();
   const a=audioCtx.createGain();
   o.type="triangle";
@@ -98,13 +95,11 @@ function play(f,d,g){
 let balls=[], knife=null;
 let scoreO=0, scoreB=0;
 let nextKnife=performance.now()+5000;
-let winner=null;
-let blood=[], ripples=[], pickupFX=[];
 
 /* ================= BALL ================= */
 function spawn(color,x){
   return{
-    x, y:Math.random()*140-70,
+    x,y:Math.random()*140-70,
     vx:color==="orange"?SPEED:-SPEED,
     vy:(Math.random()*2-1)*SPEED,
     color, knife:false, knifeT:0, rot:0,
@@ -115,31 +110,25 @@ balls=[spawn("orange",-140),spawn("blue",140)];
 
 /* ================= UPDATE ================= */
 function update(){
-  if(winner) return;
-
   const now=performance.now();
+
   if(!knife && now>nextKnife){
-    knife={x:Math.random()*220-110,y:Math.random()*220-110,t:300};
-    nextKnife=now+(5000+Math.random()*4000);
+    knife={x:Math.random()*220-110,y:Math.random()*220-110,t:300,rot:0};
+    nextKnife=now+(6000+Math.random()*4000);
   }
-  if(knife && --knife.t<=0) knife=null;
+  if(knife){
+    knife.rot+=0.04;
+    if(--knife.t<=0) knife=null;
+  }
 
   for(const b of balls){
     b.trail.unshift({x:b.x,y:b.y});
-    if(b.trail.length>22) b.trail.pop();
+    if(b.trail.length>20) b.trail.pop();
 
     b.x+=b.vx; b.y+=b.vy;
 
-    if(Math.abs(b.x)>ARENA/2-R){
-      b.x=Math.sign(b.x)*(ARENA/2-R);
-      b.vx*=-1; ripples.push({x:b.x,y:b.y,r:0,a:1});
-      play(220,0.04,0.07);
-    }
-    if(Math.abs(b.y)>ARENA/2-R){
-      b.y=Math.sign(b.y)*(ARENA/2-R);
-      b.vy*=-1; ripples.push({x:b.x,y:b.y,r:0,a:1});
-      play(220,0.04,0.07);
-    }
+    if(Math.abs(b.x)>ARENA/2-R){b.x=Math.sign(b.x)*(ARENA/2-R);b.vx*=-1;play(220,0.04,0.07);}
+    if(Math.abs(b.y)>ARENA/2-R){b.y=Math.sign(b.y)*(ARENA/2-R);b.vy*=-1;play(220,0.04,0.07);}
 
     if(b.knife){
       b.knifeT--; b.rot+=0.5;
@@ -147,57 +136,30 @@ function update(){
     }
   }
 
-  /* ==== BALL vs BALL (FIXED PHYSICS) ==== */
+  /* BALL vs BALL */
   const a=balls[0], b=balls[1];
   const dx=b.x-a.x, dy=b.y-a.y;
   const d=Math.hypot(dx,dy);
   if(d<2*R){
     const nx=dx/d, ny=dy/d;
-    const overlap=2*R-d+0.5;
-    a.x-=nx*overlap/2; a.y-=ny*overlap/2;
-    b.x+=nx*overlap/2; b.y+=ny*overlap/2;
-
-    const dvx=b.vx-a.vx, dvy=b.vy-a.vy;
-    const vn=dvx*nx+dvy*ny;
-    if(vn<0){
-      const impulse=vn;
-      a.vx+=impulse*nx; a.vy+=impulse*ny;
-      b.vx-=impulse*nx; b.vy-=impulse*ny;
-    }
-
-    if(a.knife&&!b.knife){
-      scoreO++; b.x=140; b.y=0; b.vx=-SPEED; b.vy=SPEED*Math.random();
-      a.knife=false; play(90,0.35,0.35);
-    }else if(b.knife&&!a.knife){
-      scoreB++; a.x=-140; a.y=0; a.vx=SPEED; a.vy=SPEED*Math.random();
-      b.knife=false; play(90,0.35,0.35);
-    }else if(a.knife&&b.knife){
-      a.knife=b.knife=false; play(300,0.05,0.1);
-    }else{
-      play(260,0.04,0.06);
-    }
-
-    sO.textContent=scoreO;
-    sB.textContent=scoreB;
+    const ov=2*R-d+0.5;
+    a.x-=nx*ov/2; a.y-=ny*ov/2;
+    b.x+=nx*ov/2; b.y+=ny*ov/2;
+    play(260,0.04,0.06);
   }
 
+  /* PICKUP – SAFE */
   if(knife){
     for(const b of balls){
-      if(Math.hypot(b.x-knife.x,b.y-knife.y)<R+14){
-        b.knife=true; b.knifeT=300; knife=null;
-        pickupFX.push({x:b.x,y:b.y,a:1,r:0});
+      if(Math.hypot(b.x-knife.x,b.y-knife.y)<R+16){
+        b.knife=true;
+        b.knifeT=300;
+        knife=null;
         play(420,0.15,0.22);
+        break; // 🔥 empêche le freeze
       }
     }
   }
-
-  pickupFX.forEach(p=>{p.r+=6;p.a-=0.04});
-  pickupFX=pickupFX.filter(p=>p.a>0);
-  ripples.forEach(r=>{r.r+=3;r.a-=0.04});
-  ripples=ripples.filter(r=>r.a>0);
-
-  if(scoreO>=WIN) winner="orange";
-  if(scoreB>=WIN) winner="blue";
 }
 
 /* ================= DRAW ================= */
@@ -210,21 +172,19 @@ function draw(){
   ctx.lineWidth=WALL;
   ctx.strokeRect(-ARENA/2,-ARENA/2,ARENA,ARENA);
 
-  ripples.forEach(r=>{
-    ctx.globalAlpha=r.a;
-    ctx.beginPath();
-    ctx.arc(r.x,r.y,r.r,0,Math.PI*2);
-    ctx.strokeStyle="#fff"; ctx.stroke();
-  });
-  ctx.globalAlpha=1;
-
-  pickupFX.forEach(p=>{
-    ctx.globalAlpha=p.a;
-    ctx.beginPath();
-    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-    ctx.strokeStyle="#fff"; ctx.stroke();
-  });
-  ctx.globalAlpha=1;
+  /* KNIFE */
+  if(knife){
+    ctx.save();
+    ctx.translate(knife.x,knife.y);
+    ctx.rotate(knife.rot);
+    ctx.shadowBlur=20;
+    ctx.shadowColor="#fff";
+    ctx.fillStyle="#ddd";
+    ctx.fillRect(-3,-22,6,30); // lame
+    ctx.fillStyle="#444";
+    ctx.fillRect(-6,8,12,10);  // manche
+    ctx.restore();
+  }
 
   for(const b of balls){
     for(let i=0;i<b.trail.length;i++){
@@ -258,14 +218,6 @@ function draw(){
     ctx.fill();
   }
 
-  if(winner){
-    ctx.globalAlpha=0.15;
-    ctx.fillStyle=winner==="orange"?"#ffb000":"#00c8ff";
-    ctx.beginPath();
-    ctx.arc(0,0,220,0,Math.PI*2);
-    ctx.fill();
-  }
-
   ctx.restore();
 }
 
@@ -274,6 +226,7 @@ function draw(){
 </script>
 </body>
 </html>
+
 
 
 <!-- <!DOCTYPE html>
