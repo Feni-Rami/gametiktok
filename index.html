@@ -66,49 +66,49 @@ function initAudio(){
   audioReady = true;
 }
 
-// function play(freq, dur, gain){
-//   if(!audioReady) return;
-
-//   const o = audioCtx.createOscillator();
-//   const g = audioCtx.createGain();
-
-//   o.type = "triangle"; // ⬅️ plus doux que sine
-//   o.frequency.value = freq;
-
-//   g.gain.setValueAtTime(0, audioCtx.currentTime);
-//   g.gain.linearRampToValueAtTime(gain, audioCtx.currentTime + 0.01);
-//   g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-
-//   o.connect(g);
-//   g.connect(audioCtx.destination);
-
-//   o.start();
-//   o.stop(audioCtx.currentTime + dur);
-// }
-
 function play(freq, dur, gain){
   if(!audioReady) return;
 
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
-  const f = audioCtx.createBiquadFilter();
 
-  o.type = "sine";
+  o.type = "triangle"; // ⬅️ plus doux que sine
   o.frequency.value = freq;
 
-  f.type = "highpass";
-  f.frequency.value = 800; // ⬅️ effet verre
-
-  g.gain.setValueAtTime(gain, audioCtx.currentTime);
+  g.gain.setValueAtTime(0, audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(gain, audioCtx.currentTime + 0.01);
   g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
 
-  o.connect(f);
-  f.connect(g);
+  o.connect(g);
   g.connect(audioCtx.destination);
 
   o.start();
   o.stop(audioCtx.currentTime + dur);
 }
+
+// function play(freq, dur, gain){
+//   if(!audioReady) return;
+
+//   const o = audioCtx.createOscillator();
+//   const g = audioCtx.createGain();
+//   const f = audioCtx.createBiquadFilter();
+
+//   o.type = "sine";
+//   o.frequency.value = freq;
+
+//   f.type = "highpass";
+//   f.frequency.value = 800; // ⬅️ effet verre
+
+//   g.gain.setValueAtTime(gain, audioCtx.currentTime);
+//   g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+
+//   o.connect(f);
+//   f.connect(g);
+//   g.connect(audioCtx.destination);
+
+//   o.start();
+//   o.stop(audioCtx.currentTime + dur);
+// }
   
   
 const bounceSound = () => play(220, 0.04, 0.08);
