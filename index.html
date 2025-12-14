@@ -3,6 +3,322 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Ball Arena – Ultra Style</title>
+<style>
+html,body{
+  margin:0;
+  background:#05050a;
+  overflow:hidden;
+  font-family:Arial,Helvetica,sans-serif;
+}
+canvas{display:block}
+
+/* SCORE */
+#hud{
+  position:fixed;
+  bottom:20px;
+  left:0; right:0;
+  display:flex;
+  justify-content:center;
+  gap:60px;
+  font-size:22px;
+  font-weight:700;
+  letter-spacing:1px;
+  pointer-events:none;
+}
+.orange{color:#ffb000;text-shadow:0 0 10px #ffb000}
+.blue{color:#00c8ff;text-shadow:0 0 10px #00c8ff}
+
+/* END */
+.overlay{
+  position:fixed;
+  inset:0;
+  background:radial-gradient(circle at center, rgba(255,255,255,.05), rgba(0,0,0,.85));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  font-size:36px;
+  z-index:10;
+  letter-spacing:2px;
+}
+.hidden{display:none}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="orange">ORANGE <span id="sO">0</span></div>
+  <div class="blue">BLUE <span id="sB">0</span></div>
+</div>
+
+<div id="end" class="overlay hidden">
+  <div id="winner"></div>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+/* ================= SETUP ================= */
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
+resize();addEventListener("resize",resize);
+
+const ARENA = 340;
+const BASE_RADIUS = 11;
+const SPEED = 3;
+const WIN_SCORE = 6;
+
+/* ================= CAMERA ================= */
+let camShake = 0;
+let camZoom = 0;
+
+/* ================= AUDIO ================= */
+let audioCtx,audioReady=false;
+window.addEventListener("pointerdown",()=>{
+  if(!audioReady){
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    audioReady=true;
+  }
+},{once:true});
+
+function play(freq,dur,gain){
+  if(!audioReady) return;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.type="triangle";
+  o.frequency.value=freq;
+  g.gain.setValueAtTime(0,audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(gain,audioCtx.currentTime+.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime+dur);
+}
+
+const sndBounce=()=>play(280,.03,.05);
+const sndPickup=()=>play(420,.08,.14);
+const sndKill=()=>{
+  play(90,.22,.28);
+  setTimeout(()=>play(520,.15,.18),90);
+};
+
+/* ================= STATE ================= */
+let balls=[];
+let chainsaw=null;
+let scoreO=0, scoreB=0;
+let running=true;
+let freeze=0;
+
+/* ================= BALL ================= */
+function spawnBall(side){
+  return{
+    x:side==="left"?-110:110,
+    y:(Math.random()*80-40),
+    vx:side==="left"?SPEED:-SPEED,
+    vy:(Math.random()*2-1)*SPEED,
+    color:side==="left"?"orange":"blue",
+    saw:false,
+    sawTime:0,
+    rot:0,
+    dead:false,
+    death:0,
+    trail:[]
+  };
+}
+balls=[spawnBall("left"),spawnBall("right")];
+
+/* ================= CHAINSAW ================= */
+function spawnChainsaw(){
+  chainsaw={
+    x:(Math.random()*220-110),
+    y:(Math.random()*220-110),
+    time:420,
+    pulse:0
+  };
+}
+
+/* ================= UPDATE ================= */
+function update(){
+  if(!running) return;
+  if(freeze>0){ freeze--; return; }
+
+  if(!chainsaw && Math.random()<0.01) spawnChainsaw();
+  if(chainsaw && --chainsaw.time<=0) chainsaw=null;
+
+  for(const b of balls){
+    if(b.dead){
+      b.death+=0.05;
+      if(b.death>=1){
+        const side=b.color==="orange"?"left":"right";
+        balls[balls.indexOf(b)]=spawnBall(side);
+      }
+      continue;
+    }
+
+    b.trail.unshift({x:b.x,y:b.y});
+    if(b.trail.length>14) b.trail.pop();
+
+    b.x+=b.vx;
+    b.y+=b.vy;
+
+    if(Math.abs(b.x)>ARENA/2-BASE_RADIUS) b.vx*=-1;
+    if(Math.abs(b.y)>ARENA/2-BASE_RADIUS) b.vy*=-1;
+
+    if(b.saw){
+      b.sawTime--;
+      b.rot+=0.45;
+      camShake+=0.2;
+      if(b.sawTime<=0) b.saw=false;
+    }
+  }
+
+  const a=balls[0], b=balls[1];
+  const dx=b.x-a.x, dy=b.y-a.y;
+  const d=Math.hypot(dx,dy);
+
+  if(!a.dead && !b.dead && d<BASE_RADIUS*2){
+    const nx=dx/d, ny=dy/d;
+    const overlap=BASE_RADIUS*2-d;
+    a.x-=nx*overlap/2; a.y-=ny*overlap/2;
+    b.x+=nx*overlap/2; b.y+=ny*overlap/2;
+
+    const dvx=a.vx-b.vx, dvy=a.vy-b.vy;
+    const impact=dvx*nx+dvy*ny;
+    if(impact>0){
+      a.vx-=impact*nx; a.vy-=impact*ny;
+      b.vx+=impact*nx; b.vy+=impact*ny;
+      sndBounce();
+    }
+  }
+
+  if(chainsaw){
+    for(const b of balls){
+      if(!b.dead && Math.hypot(b.x-chainsaw.x,b.y-chainsaw.y)<BASE_RADIUS+10){
+        b.saw=true;
+        b.sawTime=420;
+        chainsaw=null;
+        camZoom=0.2;
+        sndPickup();
+      }
+    }
+  }
+
+  if(!a.dead && !b.dead && d<BASE_RADIUS*2){
+    if(a.saw && !b.saw){
+      scoreO++; b.dead=true; freeze=6; camShake=10; camZoom=0.4; sndKill();
+    }else if(b.saw && !a.saw){
+      scoreB++; a.dead=true; freeze=6; camShake=10; camZoom=0.4; sndKill();
+    }
+  }
+
+  if(scoreO>=WIN_SCORE||scoreB>=WIN_SCORE){
+    document.getElementById("winner").textContent =
+      scoreO>scoreB?"ORANGE WINS":"BLUE WINS";
+    document.getElementById("end").classList.remove("hidden");
+    running=false;
+  }
+
+  camShake*=0.85;
+  camZoom*=0.9;
+}
+
+/* ================= DRAW ================= */
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.save();
+  ctx.translate(canvas.width/2,canvas.height/2);
+
+  const shakeX=(Math.random()-.5)*camShake;
+  const shakeY=(Math.random()-.5)*camShake;
+  ctx.translate(shakeX,shakeY);
+  ctx.scale(1+camZoom,1+camZoom);
+
+  /* arena */
+  const g=ctx.createLinearGradient(-ARENA/2,0,ARENA/2,0);
+  g.addColorStop(0,"#222");
+  g.addColorStop(.5,"#555");
+  g.addColorStop(1,"#222");
+  ctx.strokeStyle=g;
+  ctx.lineWidth=4;
+  ctx.strokeRect(-ARENA/2,-ARENA/2,ARENA,ARENA);
+
+  if(chainsaw){
+    ctx.save();
+    ctx.translate(chainsaw.x,chainsaw.y);
+    ctx.rotate(chainsaw.pulse+=0.2);
+    ctx.strokeStyle="#fff";
+    ctx.shadowColor="#fff";
+    ctx.shadowBlur=15;
+    ctx.beginPath();
+    ctx.arc(0,0,8,0,Math.PI*2);
+    for(let i=0;i<16;i++){
+      const a=i*Math.PI/8;
+      ctx.moveTo(Math.cos(a)*8,Math.sin(a)*8);
+      ctx.lineTo(Math.cos(a)*14,Math.sin(a)*14);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  for(const b of balls){
+    for(let i=0;i<b.trail.length;i++){
+      const t=b.trail[i];
+      ctx.globalAlpha=(1-i/b.trail.length)*0.25;
+      ctx.beginPath();
+      ctx.arc(t.x,t.y,BASE_RADIUS*(1-i/b.trail.length),0,Math.PI*2);
+      ctx.fillStyle=b.color==="orange"?"#ffb000":"#00c8ff";
+      ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    if(b.saw && !b.dead){
+      ctx.save();
+      ctx.translate(b.x,b.y);
+      ctx.rotate(b.rot);
+      ctx.shadowColor="#fff";
+      ctx.shadowBlur=20;
+      for(let i=0;i<18;i++){
+        const a=i*Math.PI/9;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a)*BASE_RADIUS,Math.sin(a)*BASE_RADIUS);
+        ctx.lineTo(Math.cos(a)*(BASE_RADIUS+14),Math.sin(a)*(BASE_RADIUS+14));
+        ctx.strokeStyle="#fff";
+        ctx.lineWidth=2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    let r=BASE_RADIUS;
+    if(b.dead) r*=1-b.death;
+    if(r>0){
+      ctx.beginPath();
+      ctx.arc(b.x,b.y,r,0,Math.PI*2);
+      ctx.fillStyle=b.color==="orange"?"#ffb000":"#00c8ff";
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+/* ================= LOOP ================= */
+(function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
+
+<!-- <!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Ball Arena – Chainsaw Ultimate</title>
 <style>
 html,body{
@@ -291,4 +607,4 @@ function draw(){
 })();
 </script>
 </body>
-</html>
+</html> -->
