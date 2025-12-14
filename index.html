@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Ball Arena – Clean Final</title>
+<title>Ball Arena – FX Restored</title>
 <style>
 html,body{
   margin:0;
@@ -16,7 +16,7 @@ canvas{display:block}
 /* HUD */
 #hud{
   position:fixed;
-  top:16px;
+  top:18px;
   left:0; right:0;
   display:flex;
   justify-content:center;
@@ -29,6 +29,19 @@ canvas{display:block}
 .score.pulse{transform:scale(1.25);filter:drop-shadow(0 0 14px currentColor)}
 .orange{color:#ffb000}
 .blue{color:#00c8ff}
+
+.overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.85);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  font-size:42px;
+  z-index:10;
+}
+.hidden{display:none}
 </style>
 </head>
 <body>
@@ -38,23 +51,26 @@ canvas{display:block}
   <div class="blue score">BLUE <span id="sB">0</span></div>
 </div>
 
+<div id="end" class="overlay hidden">
+  <div id="winner"></div>
+</div>
+
 <canvas id="c"></canvas>
 
 <script>
 /* ================= SETUP ================= */
-const canvas=c=document.getElementById("c");
+const canvas=document.getElementById("c");
 const ctx=canvas.getContext("2d");
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
 resize();addEventListener("resize",resize);
 
-/* Arena tuned */
-const ARENA=360;              // plus petite → marge visible
-const WALL=10;                // épaisseur visible
+const ARENA=380;
+const WALL=10;
 const BALL_RADIUS=18;
 const SPEED=4.2;
-const WIN_SCORE=6;
+const WIN_SCORE=5;
 
-/* ================= AUDIO (SAFE) ================= */
+/* ================= AUDIO ================= */
 let audioCtx,audioReady=false,lastSound=0;
 window.addEventListener("pointerdown",()=>{
   if(!audioReady){
@@ -66,7 +82,7 @@ window.addEventListener("pointerdown",()=>{
 function play(freq,dur,gain){
   if(!audioReady) return;
   const now=audioCtx.currentTime;
-  if(now-lastSound<0.04) return; // anti-spam iOS
+  if(now-lastSound<0.04) return;
   lastSound=now;
 
   const o=audioCtx.createOscillator();
@@ -80,10 +96,17 @@ function play(freq,dur,gain){
   o.start(); o.stop(now+dur);
 }
 
+/* ================= FX ================= */
+let flash=0;
+let ripples=[];
+let blood=[];
+let pickupFX=[];
+
 /* ================= STATE ================= */
 let balls=[], weapon=null;
 let scoreO=0, scoreB=0;
 let nextWeapon=performance.now()+6000;
+let running=true;
 
 /* ================= BALL ================= */
 function spawnBall(side){
@@ -114,6 +137,7 @@ function spawnWeapon(){
 
 /* ================= UPDATE ================= */
 function update(){
+  if(!running) return;
   const now=performance.now();
 
   if(!weapon && now>nextWeapon){
@@ -134,7 +158,7 @@ function update(){
     }
 
     ball.trail.unshift({x:ball.x,y:ball.y});
-    if(ball.trail.length>14) ball.trail.pop();
+    if(ball.trail.length>18) ball.trail.pop();
 
     ball.x+=ball.vx;
     ball.y+=ball.vy;
@@ -142,23 +166,25 @@ function update(){
     if(Math.abs(ball.x)>ARENA/2-BALL_RADIUS){
       ball.x=Math.sign(ball.x)*(ARENA/2-BALL_RADIUS);
       ball.vx*=-1;
+      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
       play(220,0.05,0.08);
     }
     if(Math.abs(ball.y)>ARENA/2-BALL_RADIUS){
       ball.y=Math.sign(ball.y)*(ARENA/2-BALL_RADIUS);
       ball.vy*=-1;
+      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
       play(220,0.05,0.08);
     }
 
     if(ball.saw){
       ball.sawTime--;
-      ball.rot+=0.5;
+      ball.rot+=0.6;
       if(ball.sawTime<=0) ball.saw=false;
     }
   }
 
-  /* Collision */
-  if(!a.dead&&!b.dead){
+  /* COLLISION */
+  if(!a.dead && !b.dead){
     const dx=b.x-a.x, dy=b.y-a.y;
     const d=Math.hypot(dx,dy), min=BALL_RADIUS*2;
     if(d<min){
@@ -167,10 +193,20 @@ function update(){
       a.x-=nx*o/2; a.y-=ny*o/2;
       b.x+=nx*o/2; b.y+=ny*o/2;
 
-      if(a.saw&&!b.saw){scoreO++;b.dead=true;a.saw=false;play(90,0.35,0.35)}
-      else if(b.saw&&!a.saw){scoreB++;a.dead=true;b.saw=false;play(90,0.35,0.35)}
-      else if(a.saw&&b.saw){a.saw=b.saw=false;play(300,0.05,0.08)}
-      else{
+      if(a.saw&&!b.saw){
+        scoreO++; b.dead=true; a.saw=false;
+        blood.push({x:b.x,y:b.y,a:1});
+        flash=1; play(90,0.35,0.35);
+        document.querySelector(".orange").classList.add("pulse");
+      }else if(b.saw&&!a.saw){
+        scoreB++; a.dead=true; b.saw=false;
+        blood.push({x:a.x,y:a.y,a:1});
+        flash=1; play(90,0.35,0.35);
+        document.querySelector(".blue").classList.add("pulse");
+      }else if(a.saw&&b.saw){
+        a.saw=b.saw=false;
+        play(300,0.05,0.08);
+      }else{
         const dvx=a.vx-b.vx, dvy=a.vy-b.vy;
         const imp=dvx*nx+dvy*ny;
         if(imp>0){
@@ -184,17 +220,35 @@ function update(){
     }
   }
 
-  /* Pickup */
+  /* PICKUP */
   if(weapon){
     for(const ball of balls){
-      if(!ball.dead&&Math.hypot(ball.x-weapon.x,ball.y-weapon.y)<BALL_RADIUS+14){
+      if(!ball.dead && Math.hypot(ball.x-weapon.x,ball.y-weapon.y)<BALL_RADIUS+14){
         ball.saw=true;
         ball.sawTime=300;
+        pickupFX.push({x:ball.x,y:ball.y,a:1,r:0});
         weapon=null;
-        play(480,0.12,0.22);
+        play(480,0.14,0.22);
         break;
       }
     }
+  }
+
+  pickupFX.forEach(p=>{p.r+=6;p.a-=0.04});
+  pickupFX=pickupFX.filter(p=>p.a>0);
+
+  ripples.forEach(r=>{r.r+=3;r.a-=0.04});
+  ripples=ripples.filter(r=>r.a>0);
+
+  blood.forEach(b=>b.a-=0.01);
+  blood=blood.filter(b=>b.a>0);
+
+  flash*=0.9;
+
+  if(scoreO>=WIN_SCORE||scoreB>=WIN_SCORE){
+    document.getElementById("winner").textContent=scoreO>scoreB?"ORANGE WINS":"BLUE WINS";
+    document.getElementById("end").classList.remove("hidden");
+    running=false;
   }
 }
 
@@ -204,35 +258,65 @@ function draw(){
   ctx.save();
   ctx.translate(canvas.width/2,canvas.height/2);
 
-  /* BG */
-  const bg=ctx.createRadialGradient(0,0,80,0,0,canvas.width);
+  const bg=ctx.createRadialGradient(0,0,70,0,0,canvas.width);
   bg.addColorStop(0,"#0b0b16");
   bg.addColorStop(1,"#040407");
   ctx.fillStyle=bg;
   ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
 
-  /* Arena */
   ctx.strokeStyle="#ffffff33";
   ctx.lineWidth=WALL;
   ctx.strokeRect(-ARENA/2,-ARENA/2,ARENA,ARENA);
 
-  /* Weapon realistic */
+  ripples.forEach(r=>{
+    ctx.globalAlpha=r.a;
+    ctx.beginPath();
+    ctx.arc(r.x,r.y,r.r,0,Math.PI*2);
+    ctx.strokeStyle="#fff";
+    ctx.stroke();
+  });
+  ctx.globalAlpha=1;
+
+  blood.forEach(b=>{
+    ctx.globalAlpha=b.a;
+    ctx.beginPath();
+    ctx.arc(b.x,b.y,36*(1-b.a),0,Math.PI*2);
+    ctx.fillStyle="#8b0000";
+    ctx.fill();
+  });
+  ctx.globalAlpha=1;
+
+  pickupFX.forEach(p=>{
+    ctx.globalAlpha=p.a;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.strokeStyle="#fff";
+    ctx.stroke();
+  });
+  ctx.globalAlpha=1;
+
   if(weapon){
     ctx.save();
     ctx.translate(weapon.x,weapon.y);
     ctx.rotate(Date.now()*0.004);
-    ctx.shadowColor="#fff";
     ctx.shadowBlur=22;
-    ctx.fillStyle="#ddd";
-    ctx.fillRect(-14,-4,28,8);     // body
-    for(let i=-12;i<=12;i+=4){     // teeth
+    ctx.strokeStyle="#fff";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.rect(-14,-5,28,10);
+    ctx.stroke();
+    for(let i=-12;i<=12;i+=4){
       ctx.beginPath();
-      ctx.moveTo(i,-6);
-      ctx.lineTo(i,-12);
-      ctx.strokeStyle="#fff";
+      ctx.moveTo(i,-7);
+      ctx.lineTo(i,-14);
       ctx.stroke();
     }
     ctx.restore();
+  }
+
+  if(flash>0){
+    ctx.fillStyle=`rgba(255,255,255,${flash*0.25})`;
+    ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
   }
 
   for(const b of balls){
