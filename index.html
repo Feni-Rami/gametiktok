@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Ball Arena – Chainsaw Final</title>
+<title>Ball Arena – Chainsaw Ultimate</title>
 <style>
 html,body{
   margin:0;
@@ -63,8 +63,9 @@ const ctx = canvas.getContext("2d");
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
 resize();addEventListener("resize",resize);
 
-const ARENA = 260;
-const BALL_RADIUS = 10;
+const ARENA = 320;            // ⬅️ PLUS GRAND
+const BASE_RADIUS = 11;
+const SPEED = 2.9;            // ⬅️ PLUS RAPIDE
 const WIN_SCORE = 6;
 
 /* ================= AUDIO ================= */
@@ -89,15 +90,13 @@ function play(freq,dur,gain){
   o.start(); o.stop(audioCtx.currentTime+dur);
 }
 
-/* Sound design */
-const bounce = ()=>play(300,.025,.05);
-const pickup = ()=>{
-  play(220,.04,.08);
-  play(360,.08,.12);
-};
-const kill = ()=>{
-  play(110,.18,.25);
-  setTimeout(()=>play(60,.25,.18),40);
+/* sounds */
+const bounce=()=>play(260,.03,.05);
+const pickup=()=>play(380,.07,.12);
+const chainsawHum=()=>play(120,.05,.03);
+const killSound=()=>{
+  play(90,.2,.25);
+  setTimeout(()=>play(420,.12,.12),80);
 };
 
 /* ================= STATE ================= */
@@ -106,27 +105,29 @@ let chainsaw=null;
 let scoreO=0, scoreB=0;
 let running=true;
 
-/* ================= INIT ================= */
+/* ================= BALL ================= */
 function spawnBall(side){
   return {
-    x: side==="left"? -80:80,
-    y: (Math.random()*60-30),
-    vx: side==="left"? 2.4:-2.4,
-    vy: (Math.random()*2-1)*2,
+    x: side==="left"? -100:100,
+    y: (Math.random()*80-40),
+    vx: side==="left"? SPEED:-SPEED,
+    vy: (Math.random()*2-1)*SPEED,
     color: side==="left"?"orange":"blue",
     saw:false,
     sawTime:0,
-    rot:0
+    rot:0,
+    dead:false,
+    deathAnim:0
   };
 }
 
-balls=[spawnBall("left"), spawnBall("right")];
+balls=[spawnBall("left"),spawnBall("right")];
 
 /* ================= CHAINSAW ================= */
 function spawnChainsaw(){
   chainsaw={
-    x:(Math.random()*160-80),
-    y:(Math.random()*160-80),
+    x:(Math.random()*200-100),
+    y:(Math.random()*200-100),
     time:360
   };
 }
@@ -147,15 +148,25 @@ function update(){
   if(chainsaw && --chainsaw.time<=0) chainsaw=null;
 
   for(const b of balls){
+    if(b.dead){
+      b.deathAnim+=0.06;
+      if(b.deathAnim>=1){
+        const side=b.color==="orange"?"left":"right";
+        balls[balls.indexOf(b)] = spawnBall(side);
+      }
+      continue;
+    }
+
     b.x+=b.vx;
     b.y+=b.vy;
 
-    if(Math.abs(b.x)>ARENA/2-BALL_RADIUS) b.vx*=-1;
-    if(Math.abs(b.y)>ARENA/2-BALL_RADIUS) b.vy*=-1;
+    if(Math.abs(b.x)>ARENA/2-BASE_RADIUS) b.vx*=-1;
+    if(Math.abs(b.y)>ARENA/2-BASE_RADIUS) b.vy*=-1;
 
     if(b.saw){
       b.sawTime--;
-      b.rot+=0.3;
+      b.rot+=0.4;
+      chainsawHum();
       if(b.sawTime<=0) b.saw=false;
     }
   }
@@ -165,9 +176,9 @@ function update(){
   const d=Math.hypot(dx,dy);
 
   /* normal collision */
-  if(d < BALL_RADIUS*2){
+  if(!a.dead && !b.dead && d < BASE_RADIUS*2){
     const nx=dx/d, ny=dy/d;
-    const overlap = BALL_RADIUS*2 - d;
+    const overlap = BASE_RADIUS*2 - d;
     a.x -= nx*overlap/2; a.y -= ny*overlap/2;
     b.x += nx*overlap/2; b.y += ny*overlap/2;
 
@@ -180,10 +191,10 @@ function update(){
     }
   }
 
-  /* pickup chainsaw */
+  /* pickup */
   if(chainsaw){
     for(const b of balls){
-      if(Math.hypot(b.x-chainsaw.x,b.y-chainsaw.y)<BALL_RADIUS+8){
+      if(!b.dead && Math.hypot(b.x-chainsaw.x,b.y-chainsaw.y)<BASE_RADIUS+8){
         b.saw=true;
         b.sawTime=360;
         chainsaw=null;
@@ -193,17 +204,17 @@ function update(){
     }
   }
 
-  /* kill logic */
-  if(d < BALL_RADIUS*2){
+  /* kill */
+  if(!a.dead && !b.dead && d < BASE_RADIUS*2){
     if(a.saw && !b.saw){
-      scoreO++; balls[1]=spawnBall("right"); kill();
+      scoreO++; b.dead=true; killSound();
     } else if(b.saw && !a.saw){
-      scoreB++; balls[0]=spawnBall("left"); kill();
+      scoreB++; a.dead=true; killSound();
     }
     updateScore();
   }
 
-  if(scoreO>=WIN_SCORE || scoreB>=WIN_SCORE){
+  if(scoreO>=WIN_SCORE||scoreB>=WIN_SCORE){
     document.getElementById("winner").textContent =
       scoreO>scoreB?"ORANGE WINS":"BLUE WINS";
     document.getElementById("end").classList.remove("hidden");
@@ -218,11 +229,11 @@ function drawChainsaw(){
   ctx.strokeStyle="#fff";
   ctx.lineWidth=2;
   ctx.beginPath();
-  ctx.arc(0,0,6,0,Math.PI*2);
-  for(let i=0;i<12;i++){
-    const a=i*Math.PI/6;
-    ctx.moveTo(Math.cos(a)*6,Math.sin(a)*6);
-    ctx.lineTo(Math.cos(a)*10,Math.sin(a)*10);
+  ctx.arc(0,0,7,0,Math.PI*2);
+  for(let i=0;i<14;i++){
+    const a=i*Math.PI/7;
+    ctx.moveTo(Math.cos(a)*7,Math.sin(a)*7);
+    ctx.lineTo(Math.cos(a)*12,Math.sin(a)*12);
   }
   ctx.stroke();
   ctx.restore();
@@ -234,11 +245,11 @@ function drawSpikes(b){
   ctx.rotate(b.rot);
   ctx.strokeStyle="#fff";
   ctx.lineWidth=2;
-  for(let i=0;i<14;i++){
-    const a=i*Math.PI/7;
+  for(let i=0;i<16;i++){
+    const a=i*Math.PI/8;
     ctx.beginPath();
-    ctx.moveTo(Math.cos(a)*BALL_RADIUS,Math.sin(a)*BALL_RADIUS);
-    ctx.lineTo(Math.cos(a)*(BALL_RADIUS+10),Math.sin(a)*(BALL_RADIUS+10));
+    ctx.moveTo(Math.cos(a)*BASE_RADIUS,Math.sin(a)*BASE_RADIUS);
+    ctx.lineTo(Math.cos(a)*(BASE_RADIUS+10),Math.sin(a)*(BASE_RADIUS+10));
     ctx.stroke();
   }
   ctx.restore();
@@ -255,11 +266,19 @@ function draw(){
   if(chainsaw) drawChainsaw();
 
   for(const b of balls){
-    if(b.saw) drawSpikes(b);
-    ctx.beginPath();
-    ctx.arc(b.x,b.y,BALL_RADIUS,0,Math.PI*2);
-    ctx.fillStyle=b.color==="orange"?"#ff9f00":"#00baff";
-    ctx.fill();
+    let r = BASE_RADIUS;
+    if(b.dead) r = BASE_RADIUS*(1-b.deathAnim);
+
+    if(b.saw && !b.dead) drawSpikes(b);
+
+    if(r>0){
+      ctx.beginPath();
+      ctx.arc(b.x,b.y,r,0,Math.PI*2);
+      ctx.fillStyle=b.color==="orange"?"#ff9f00":"#00baff";
+      ctx.globalAlpha=b.dead?1-b.deathAnim:1;
+      ctx.fill();
+      ctx.globalAlpha=1;
+    }
   }
   ctx.restore();
 }
@@ -273,271 +292,3 @@ function draw(){
 </script>
 </body>
 </html>
-
-<!-- <!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Ball Arena – Chainsaw</title>
-<style>
-html,body{
-  margin:0;
-  background:#020204;
-  overflow:hidden;
-  font-family:Arial,Helvetica,sans-serif;
-}
-canvas{display:block}
-
-/* SCORE HUD */
-#hud{
-  position:fixed;
-  bottom:18px;
-  left:0; right:0;
-  display:flex;
-  justify-content:center;
-  gap:40px;
-  font-size:22px;
-  font-weight:bold;
-  pointer-events:none;
-}
-.orange{color:#ff9f00}
-.blue{color:#00baff}
-
-/* END */
-.overlay{
-  position:fixed;
-  inset:0;
-  background:rgba(0,0,0,.75);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  color:#fff;
-  font-size:32px;
-  z-index:10;
-}
-.hidden{display:none}
-</style>
-</head>
-<body>
-
-<div id="hud">
-  <div class="orange">ORANGE <span id="sO">0</span></div>
-  <div class="blue">BLUE <span id="sB">0</span></div>
-</div>
-
-<div id="end" class="overlay hidden">
-  <div id="winner"></div>
-</div>
-
-<canvas id="c"></canvas>
-
-<script>
-/* ================= SETUP ================= */
-const canvas = document.getElementById("c");
-const ctx = canvas.getContext("2d");
-function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
-resize();addEventListener("resize",resize);
-
-const ARENA = 260;
-const BALL_RADIUS = 10;
-const WIN_SCORE = 6;
-
-/* ================= AUDIO ================= */
-let audioCtx,audioReady=false;
-function unlockAudio(){
-  if(audioReady) return;
-  audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  audioReady=true;
-}
-window.addEventListener("pointerdown",unlockAudio,{once:true});
-
-function play(freq,dur,gain){
-  if(!audioReady) return;
-  const o=audioCtx.createOscillator();
-  const g=audioCtx.createGain();
-  o.type="triangle";
-  o.frequency.value=freq;
-  g.gain.setValueAtTime(0,audioCtx.currentTime);
-  g.gain.linearRampToValueAtTime(gain,audioCtx.currentTime+.01);
-  g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+dur);
-  o.connect(g); g.connect(audioCtx.destination);
-  o.start(); o.stop(audioCtx.currentTime+dur);
-}
-const bounce=()=>play(240,.03,.05);
-const pickup=()=>play(360,.06,.12);
-const kill=()=>play(140,.18,.22);
-
-/* ================= STATE ================= */
-let balls=[];
-let chainsaw=null;
-let scoreO=0, scoreB=0;
-let running=true;
-
-/* ================= INIT ================= */
-function resetRound(){
-  balls=[
-    {x:-70,y:0,vx:2.3,vy:1.7,color:"orange",saw:false,sawTime:0,rot:0},
-    {x: 70,y:0,vx:-2.3,vy:-1.7,color:"blue",saw:false,sawTime:0,rot:0}
-  ];
-  chainsaw=null;
-}
-resetRound();
-
-/* ================= CHAINSAW ================= */
-function spawnChainsaw(){
-  chainsaw={
-    x:(Math.random()*160-80),
-    y:(Math.random()*160-80),
-    time:360
-  };
-}
-
-/* ================= UI ================= */
-const sO=document.getElementById("sO");
-const sB=document.getElementById("sB");
-function updateScore(){
-  sO.textContent=scoreO;
-  sB.textContent=scoreB;
-}
-
-/* ================= UPDATE ================= */
-function update(){
-  if(!running) return;
-
-  /* spawn chainsaw */
-  if(!chainsaw && Math.random()<0.01) spawnChainsaw();
-  if(chainsaw){
-    chainsaw.time--;
-    if(chainsaw.time<=0) chainsaw=null;
-  }
-
-  for(const b of balls){
-    b.x+=b.vx;
-    b.y+=b.vy;
-
-    if(Math.abs(b.x)>ARENA/2-BALL_RADIUS) b.vx*=-1;
-    if(Math.abs(b.y)>ARENA/2-BALL_RADIUS) b.vy*=-1;
-
-    if(b.saw){
-      b.sawTime--;
-      b.rot += 0.25;
-      if(b.sawTime<=0) b.saw=false;
-    }
-  }
-
-  /* ball ↔ ball physics */
-  const a=balls[0], b=balls[1];
-  const dx=b.x-a.x, dy=b.y-a.y;
-  const d=Math.hypot(dx,dy);
-
-  if(d < BALL_RADIUS*2){
-    const nx=dx/d, ny=dy/d;
-    const overlap = BALL_RADIUS*2 - d;
-    a.x -= nx*overlap/2; a.y -= ny*overlap/2;
-    b.x += nx*overlap/2; b.y += ny*overlap/2;
-
-    const dvx=a.vx-b.vx, dvy=a.vy-b.vy;
-    const impact=dvx*nx+dvy*ny;
-    if(impact>0){
-      a.vx-=impact*nx; a.vy-=impact*ny;
-      b.vx+=impact*nx; b.vy+=impact*ny;
-      bounce();
-    }
-  }
-
-  /* pickup chainsaw */
-  if(chainsaw){
-    for(const b of balls){
-      if(Math.hypot(b.x-chainsaw.x,b.y-chainsaw.y)<BALL_RADIUS+8){
-        b.saw=true;
-        b.sawTime=360;
-        chainsaw=null;
-        pickup();
-        break;
-      }
-    }
-  }
-
-  /* kill logic */
-  if(d < BALL_RADIUS*2){
-    if(a.saw && !b.saw){
-      scoreO++; resetRound(); kill();
-    } else if(b.saw && !a.saw){
-      scoreB++; resetRound(); kill();
-    }
-    updateScore();
-  }
-
-  if(scoreO>=WIN_SCORE || scoreB>=WIN_SCORE){
-    document.getElementById("winner").textContent =
-      scoreO>scoreB ? "ORANGE WINS" : "BLUE WINS";
-    document.getElementById("end").classList.remove("hidden");
-    running=false;
-  }
-}
-
-/* ================= DRAW ================= */
-function drawChainsaw(){
-  ctx.save();
-  ctx.translate(chainsaw.x,chainsaw.y);
-  ctx.strokeStyle="#fff";
-  ctx.lineWidth=2;
-  ctx.beginPath();
-  ctx.arc(0,0,6,0,Math.PI*2);
-  for(let i=0;i<10;i++){
-    const a=i*Math.PI/5;
-    ctx.moveTo(Math.cos(a)*6,Math.sin(a)*6);
-    ctx.lineTo(Math.cos(a)*10,Math.sin(a)*10);
-  }
-  ctx.stroke();
-  ctx.restore();
-}
-
-function drawSpikes(b){
-  ctx.save();
-  ctx.translate(b.x,b.y);
-  ctx.rotate(b.rot);
-  ctx.strokeStyle="#fff";
-  ctx.lineWidth=2;
-  for(let i=0;i<12;i++){
-    const a=i*Math.PI/6;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(a)*BALL_RADIUS,Math.sin(a)*BALL_RADIUS);
-    ctx.lineTo(Math.cos(a)*(BALL_RADIUS+8),Math.sin(a)*(BALL_RADIUS+8));
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.save();
-  ctx.translate(canvas.width/2,canvas.height/2);
-
-  ctx.strokeStyle="#ffffff33";
-  ctx.strokeRect(-ARENA/2,-ARENA/2,ARENA,ARENA);
-
-  if(chainsaw) drawChainsaw();
-
-  for(const b of balls){
-    if(b.saw) drawSpikes(b);
-
-    ctx.beginPath();
-    ctx.arc(b.x,b.y,BALL_RADIUS,0,Math.PI*2);
-    ctx.fillStyle=b.color==="orange"?"#ff9f00":"#00baff";
-    ctx.fill();
-  }
-
-  ctx.restore();
-}
-
-/* ================= LOOP ================= */
-(function loop(){
-  update();
-  draw();
-  requestAnimationFrame(loop);
-})();
-</script>
-</body>
-</html> -->
