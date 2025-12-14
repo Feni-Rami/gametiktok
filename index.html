@@ -82,6 +82,7 @@ window.addEventListener("pointerdown",()=>{
   if(!audioReady){
     audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     audioReady=true;
+    play(180,0.05,0.05); // petit click de confirmation
   }
 },{once:true});
 
