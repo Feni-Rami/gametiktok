@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Ball Arena – Final FX</title>
+<title>Ball Arena – Collision Fixed</title>
 <style>
 html,body{
   margin:0;
@@ -17,7 +17,7 @@ canvas{display:block}
 #hud{
   position:fixed;
   left:0; right:0;
-  top:calc(50% - 230px); /* ⬅️ juste au-dessus de l’arène */
+  top:calc(50% - 230px);
   display:flex;
   justify-content:center;
   gap:90px;
@@ -25,13 +25,8 @@ canvas{display:block}
   font-weight:800;
   pointer-events:none;
 }
-.score{
-  transition:transform .18s ease, filter .18s ease;
-}
-.score.bump{
-  transform:scale(1.35);
-  filter:drop-shadow(0 0 18px currentColor);
-}
+.score{transition:transform .18s ease, filter .18s ease}
+.score.bump{transform:scale(1.35);filter:drop-shadow(0 0 18px currentColor)}
 .orange{color:#ffb000}
 .blue{color:#00c8ff}
 
@@ -64,45 +59,45 @@ canvas{display:block}
 
 <script>
 /* ================= SETUP ================= */
-const canvas=document.getElementById("c");
-const ctx=canvas.getContext("2d");
-function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
-resize();addEventListener("resize",resize);
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+function resize(){ canvas.width=innerWidth; canvas.height=innerHeight }
+resize(); addEventListener("resize",resize);
 
-const ARENA=380;
-const WALL=10;
-const BALL_RADIUS=18;
-const SPEED=4.2;
-const WIN_SCORE=5;
+const ARENA = 380;
+const WALL = 10;
+const BALL_RADIUS = 18;
+const SPEED = 4.2;
+const WIN_SCORE = 5;
 
 /* ================= AUDIO ================= */
-let audioCtx,audioReady=false,lastSound=0;
+let audioCtx, audioReady=false, lastSound=0;
 window.addEventListener("pointerdown",()=>{
   if(!audioReady){
-    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    audioReady=true;
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    audioReady = true;
   }
 },{once:true});
 
 function play(freq,dur,gain){
   if(!audioReady) return;
-  const now=audioCtx.currentTime;
-  if(now-lastSound<0.04) return;
-  lastSound=now;
+  const now = audioCtx.currentTime;
+  if(now-lastSound < 0.035) return;
+  lastSound = now;
 
-  const o=audioCtx.createOscillator();
-  const g=audioCtx.createGain();
-  o.type="triangle";
-  o.frequency.value=freq;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = "triangle";
+  o.frequency.value = freq;
   g.gain.setValueAtTime(0,now);
-  g.gain.linearRampToValueAtTime(gain,now+.01);
+  g.gain.linearRampToValueAtTime(gain,now+0.01);
   g.gain.exponentialRampToValueAtTime(0.0001,now+dur);
   o.connect(g); g.connect(audioCtx.destination);
   o.start(); o.stop(now+dur);
 }
 
 /* ================= FX ================= */
-let ripples=[], blood=[], fireFX=[];
+let ripples=[], blood=[], pickupFX=[], fireFX=[], flash=0;
 
 /* ================= STATE ================= */
 let balls=[], weapon=null;
@@ -156,54 +151,78 @@ function update(){
     if(ball.dead){
       ball.death+=0.05;
       if(ball.death>=1){
-        balls[balls.indexOf(ball)]=spawnBall(ball.color==="orange"?"left":"right");
+        balls[balls.indexOf(ball)] = spawnBall(ball.color==="orange"?"left":"right");
       }
       continue;
     }
 
     ball.trail.unshift({x:ball.x,y:ball.y});
-    if(ball.trail.length>18) ball.trail.pop();
+    if(ball.trail.length>16) ball.trail.pop();
 
     ball.x+=ball.vx;
     ball.y+=ball.vy;
 
     if(Math.abs(ball.x)>ARENA/2-BALL_RADIUS){
+      ball.x=Math.sign(ball.x)*(ARENA/2-BALL_RADIUS);
       ball.vx*=-1;
-      play(220,0.05,0.08);
+      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
+      play(220,0.04,0.07);
     }
     if(Math.abs(ball.y)>ARENA/2-BALL_RADIUS){
+      ball.y=Math.sign(ball.y)*(ARENA/2-BALL_RADIUS);
       ball.vy*=-1;
-      play(220,0.05,0.08);
+      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
+      play(220,0.04,0.07);
     }
 
     if(ball.saw){
       ball.sawTime--;
       ball.rot+=0.6;
       fireFX.push({x:ball.x,y:ball.y,a:1});
-      play(520,0.02,0.025);
+      play(520,0.02,0.02);
       if(ball.sawTime<=0) ball.saw=false;
     }
   }
 
-  /* COLLISION */
-  const dx=b.x-a.x, dy=b.y-a.y;
-  const d=Math.hypot(dx,dy);
-  if(!a.dead && !b.dead && d<BALL_RADIUS*2){
-    if(a.saw&&!b.saw){
-      scoreO++; b.dead=true; a.saw=false;
-      blood.push({x:b.x,y:b.y,a:1});
-      bumpScore(document.getElementById("oScore"));
-      play(90,0.35,0.35);
-    }else if(b.saw&&!a.saw){
-      scoreB++; a.dead=true; b.saw=false;
-      blood.push({x:a.x,y:a.y,a:1});
-      bumpScore(document.getElementById("bScore"));
-      play(90,0.35,0.35);
-    }else{
-      play(300,0.05,0.08);
+  /* ==== BALL ↔ BALL COLLISION (FIXED) ==== */
+  if(!a.dead && !b.dead){
+    const dx=b.x-a.x, dy=b.y-a.y;
+    const d=Math.hypot(dx,dy);
+    const min=BALL_RADIUS*2;
+
+    if(d<min && d>0){
+      const nx=dx/d, ny=dy/d;
+      const overlap=min-d;
+      a.x-=nx*overlap/2; a.y-=ny*overlap/2;
+      b.x+=nx*overlap/2; b.y+=ny*overlap/2;
+
+      const dvx=a.vx-b.vx, dvy=a.vy-b.vy;
+      const impulse=dvx*nx+dvy*ny;
+
+      if(a.saw&&!b.saw){
+        scoreO++; b.dead=true; a.saw=false;
+        blood.push({x:b.x,y:b.y,a:1});
+        bumpScore(document.getElementById("oScore"));
+        play(90,0.35,0.35);
+      }else if(b.saw&&!a.saw){
+        scoreB++; a.dead=true; b.saw=false;
+        blood.push({x:a.x,y:a.y,a:1});
+        bumpScore(document.getElementById("bScore"));
+        play(90,0.35,0.35);
+      }else if(a.saw&&b.saw){
+        a.saw=b.saw=false;
+        play(300,0.05,0.08);
+      }else{
+        if(impulse>0){
+          a.vx-=impulse*nx; a.vy-=impulse*ny;
+          b.vx+=impulse*nx; b.vy+=impulse*ny;
+        }
+        play(260,0.04,0.06);
+      }
+
+      document.getElementById("sO").textContent=scoreO;
+      document.getElementById("sB").textContent=scoreB;
     }
-    document.getElementById("sO").textContent=scoreO;
-    document.getElementById("sB").textContent=scoreB;
   }
 
   /* PICKUP */
@@ -212,18 +231,24 @@ function update(){
       if(!ball.dead && Math.hypot(ball.x-weapon.x,ball.y-weapon.y)<BALL_RADIUS+14){
         ball.saw=true;
         ball.sawTime=300;
-        play(480,0.15,0.22);
+        pickupFX.push({x:ball.x,y:ball.y,a:1,r:0});
         weapon=null;
+        play(480,0.15,0.22);
         break;
       }
     }
   }
 
+  pickupFX.forEach(p=>{p.r+=6;p.a-=0.04});
+  pickupFX=pickupFX.filter(p=>p.a>0);
   fireFX.forEach(f=>f.a-=0.04);
   fireFX=fireFX.filter(f=>f.a>0);
-
+  ripples.forEach(r=>{r.r+=3;r.a-=0.04});
+  ripples=ripples.filter(r=>r.a>0);
   blood.forEach(b=>b.a-=0.01);
   blood=blood.filter(b=>b.a>0);
+
+  flash*=0.9;
 
   if(scoreO>=WIN_SCORE||scoreB>=WIN_SCORE){
     document.getElementById("winner").textContent=scoreO>scoreB?"ORANGE WINS":"BLUE WINS";
@@ -241,6 +266,15 @@ function draw(){
   ctx.strokeStyle="#ffffff33";
   ctx.lineWidth=WALL;
   ctx.strokeRect(-ARENA/2,-ARENA/2,ARENA,ARENA);
+
+  ripples.forEach(r=>{
+    ctx.globalAlpha=r.a;
+    ctx.beginPath();
+    ctx.arc(r.x,r.y,r.r,0,Math.PI*2);
+    ctx.strokeStyle="#fff";
+    ctx.stroke();
+  });
+  ctx.globalAlpha=1;
 
   fireFX.forEach(f=>{
     ctx.globalAlpha=f.a;
@@ -260,6 +294,15 @@ function draw(){
   });
   ctx.globalAlpha=1;
 
+  pickupFX.forEach(p=>{
+    ctx.globalAlpha=p.a;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.strokeStyle="#fff";
+    ctx.stroke();
+  });
+  ctx.globalAlpha=1;
+
   if(weapon){
     ctx.beginPath();
     ctx.arc(weapon.x,weapon.y,12,0,Math.PI*2);
@@ -268,6 +311,31 @@ function draw(){
   }
 
   for(const b of balls){
+    for(let i=0;i<b.trail.length;i++){
+      ctx.globalAlpha=(1-i/b.trail.length)*0.25;
+      ctx.beginPath();
+      ctx.arc(b.trail[i].x,b.trail[i].y,BALL_RADIUS*(1-i/b.trail.length),0,Math.PI*2);
+      ctx.fillStyle=b.color==="orange"?"#ffb000":"#00c8ff";
+      ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    if(b.saw){
+      ctx.save();
+      ctx.translate(b.x,b.y);
+      ctx.rotate(b.rot);
+      ctx.shadowBlur=30;
+      for(let i=0;i<22;i++){
+        const a=i*Math.PI/11;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a)*BALL_RADIUS,Math.sin(a)*BALL_RADIUS);
+        ctx.lineTo(Math.cos(a)*(BALL_RADIUS+22),Math.sin(a)*(BALL_RADIUS+22));
+        ctx.strokeStyle="#fff";
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     if(!b.dead){
       ctx.beginPath();
       ctx.arc(b.x,b.y,BALL_RADIUS,0,Math.PI*2);
@@ -280,7 +348,7 @@ function draw(){
 }
 
 /* ================= LOOP ================= */
-(function loop(){update();draw();requestAnimationFrame(loop)})();
+(function loop(){ update(); draw(); requestAnimationFrame(loop); })();
 </script>
 </body>
 </html>
