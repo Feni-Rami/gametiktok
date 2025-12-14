@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Ball Arena – FX Restored</title>
+<title>Ball Arena – Final Polish</title>
 <style>
 html,body{
   margin:0;
@@ -16,17 +16,22 @@ canvas{display:block}
 /* HUD */
 #hud{
   position:fixed;
-  top:18px;
+  top:calc(50% - 240px);
   left:0; right:0;
   display:flex;
   justify-content:center;
-  gap:90px;
+  gap:100px;
   font-size:26px;
-  font-weight:800;
+  font-weight:900;
   pointer-events:none;
 }
-.score{transition:transform .15s ease, filter .15s ease}
-.score.pulse{transform:scale(1.25);filter:drop-shadow(0 0 14px currentColor)}
+.score{
+  transition:transform .18s ease, filter .18s ease;
+}
+.score.fire{
+  transform:scale(1.35);
+  filter:drop-shadow(0 0 20px currentColor);
+}
 .orange{color:#ffb000}
 .blue{color:#00c8ff}
 
@@ -47,8 +52,8 @@ canvas{display:block}
 <body>
 
 <div id="hud">
-  <div class="orange score">ORANGE <span id="sO">0</span></div>
-  <div class="blue score">BLUE <span id="sB">0</span></div>
+  <div id="o" class="orange score">ORANGE <span id="sO">0</span></div>
+  <div id="b" class="blue score">BLUE <span id="sB">0</span></div>
 </div>
 
 <div id="end" class="overlay hidden">
@@ -65,13 +70,12 @@ function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
 resize();addEventListener("resize",resize);
 
 const ARENA=380;
-const WALL=10;
 const BALL_RADIUS=18;
 const SPEED=4.2;
 const WIN_SCORE=5;
 
 /* ================= AUDIO ================= */
-let audioCtx,audioReady=false,lastSound=0;
+let audioCtx,audioReady=false;
 window.addEventListener("pointerdown",()=>{
   if(!audioReady){
     audioCtx=new (window.AudioContext||window.webkitAudioContext)();
@@ -81,31 +85,23 @@ window.addEventListener("pointerdown",()=>{
 
 function play(freq,dur,gain){
   if(!audioReady) return;
-  const now=audioCtx.currentTime;
-  if(now-lastSound<0.04) return;
-  lastSound=now;
-
   const o=audioCtx.createOscillator();
   const g=audioCtx.createGain();
   o.type="triangle";
   o.frequency.value=freq;
-  g.gain.setValueAtTime(0,now);
-  g.gain.linearRampToValueAtTime(gain,now+.01);
-  g.gain.exponentialRampToValueAtTime(0.0001,now+dur);
+  g.gain.setValueAtTime(0,audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(gain,audioCtx.currentTime+.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+dur);
   o.connect(g); g.connect(audioCtx.destination);
-  o.start(); o.stop(now+dur);
+  o.start(); o.stop(audioCtx.currentTime+dur);
 }
 
 /* ================= FX ================= */
-let flash=0;
-let ripples=[];
-let blood=[];
-let pickupFX=[];
+let fireFX=[], blood=[], ripples=[], flash=0;
 
 /* ================= STATE ================= */
 let balls=[], weapon=null;
 let scoreO=0, scoreB=0;
-let nextWeapon=performance.now()+6000;
 let running=true;
 
 /* ================= BALL ================= */
@@ -128,22 +124,20 @@ balls=[spawnBall("left"),spawnBall("right")];
 
 /* ================= WEAPON ================= */
 function spawnWeapon(){
-  weapon={
-    x:(Math.random()*200-100),
-    y:(Math.random()*200-100),
-    t:300
-  };
+  weapon={x:(Math.random()*200-100),y:(Math.random()*200-100),t:300};
+}
+
+/* ================= SCORE FX ================= */
+function fireScore(el){
+  el.classList.add("fire");
+  setTimeout(()=>el.classList.remove("fire"),200);
 }
 
 /* ================= UPDATE ================= */
 function update(){
   if(!running) return;
-  const now=performance.now();
 
-  if(!weapon && now>nextWeapon){
-    spawnWeapon();
-    nextWeapon=now+(6000+Math.random()*4000);
-  }
+  if(!weapon && Math.random()<0.006) spawnWeapon();
   if(weapon && --weapon.t<=0) weapon=null;
 
   const a=balls[0], b=balls[1];
@@ -164,86 +158,60 @@ function update(){
     ball.y+=ball.vy;
 
     if(Math.abs(ball.x)>ARENA/2-BALL_RADIUS){
-      ball.x=Math.sign(ball.x)*(ARENA/2-BALL_RADIUS);
       ball.vx*=-1;
-      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
-      play(220,0.05,0.08);
+      play(220,0.04,0.08);
     }
     if(Math.abs(ball.y)>ARENA/2-BALL_RADIUS){
-      ball.y=Math.sign(ball.y)*(ARENA/2-BALL_RADIUS);
       ball.vy*=-1;
-      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
-      play(220,0.05,0.08);
+      play(220,0.04,0.08);
     }
 
     if(ball.saw){
       ball.sawTime--;
       ball.rot+=0.6;
+      fireFX.push({x:ball.x,y:ball.y,a:1});
+      play(520,0.02,0.03);
       if(ball.sawTime<=0) ball.saw=false;
     }
   }
 
-  /* COLLISION */
-  if(!a.dead && !b.dead){
-    const dx=b.x-a.x, dy=b.y-a.y;
-    const d=Math.hypot(dx,dy), min=BALL_RADIUS*2;
-    if(d<min){
-      const nx=dx/d, ny=dy/d;
-      const o=min-d;
-      a.x-=nx*o/2; a.y-=ny*o/2;
-      b.x+=nx*o/2; b.y+=ny*o/2;
-
-      if(a.saw&&!b.saw){
-        scoreO++; b.dead=true; a.saw=false;
-        blood.push({x:b.x,y:b.y,a:1});
-        flash=1; play(90,0.35,0.35);
-        document.querySelector(".orange").classList.add("pulse");
-      }else if(b.saw&&!a.saw){
-        scoreB++; a.dead=true; b.saw=false;
-        blood.push({x:a.x,y:a.y,a:1});
-        flash=1; play(90,0.35,0.35);
-        document.querySelector(".blue").classList.add("pulse");
-      }else if(a.saw&&b.saw){
-        a.saw=b.saw=false;
-        play(300,0.05,0.08);
-      }else{
-        const dvx=a.vx-b.vx, dvy=a.vy-b.vy;
-        const imp=dvx*nx+dvy*ny;
-        if(imp>0){
-          a.vx-=imp*nx; a.vy-=imp*ny;
-          b.vx+=imp*nx; b.vy+=imp*ny;
-        }
-        play(260,0.04,0.06);
-      }
-      document.getElementById("sO").textContent=scoreO;
-      document.getElementById("sB").textContent=scoreB;
+  /* Collision */
+  const dx=b.x-a.x, dy=b.y-a.y;
+  const d=Math.hypot(dx,dy);
+  if(!a.dead && !b.dead && d<BALL_RADIUS*2){
+    if(a.saw&&!b.saw){
+      scoreO++; b.dead=true; a.saw=false;
+      blood.push({x:b.x,y:b.y,a:1});
+      fireScore(document.getElementById("o"));
+      play(90,0.35,0.35);
+    }else if(b.saw&&!a.saw){
+      scoreB++; a.dead=true; b.saw=false;
+      blood.push({x:a.x,y:a.y,a:1});
+      fireScore(document.getElementById("b"));
+      play(90,0.35,0.35);
+    }else{
+      play(300,0.05,0.08);
     }
+    document.getElementById("sO").textContent=scoreO;
+    document.getElementById("sB").textContent=scoreB;
   }
 
-  /* PICKUP */
+  /* Pickup */
   if(weapon){
     for(const ball of balls){
       if(!ball.dead && Math.hypot(ball.x-weapon.x,ball.y-weapon.y)<BALL_RADIUS+14){
         ball.saw=true;
         ball.sawTime=300;
-        pickupFX.push({x:ball.x,y:ball.y,a:1,r:0});
+        play(480,0.15,0.22);
         weapon=null;
-        play(480,0.14,0.22);
-        break;
       }
     }
   }
 
-  pickupFX.forEach(p=>{p.r+=6;p.a-=0.04});
-  pickupFX=pickupFX.filter(p=>p.a>0);
-
-  ripples.forEach(r=>{r.r+=3;r.a-=0.04});
-  ripples=ripples.filter(r=>r.a>0);
-
+  fireFX.forEach(f=>f.a-=0.04);
+  fireFX=fireFX.filter(f=>f.a>0);
   blood.forEach(b=>b.a-=0.01);
   blood=blood.filter(b=>b.a>0);
-
-  flash*=0.9;
 
   if(scoreO>=WIN_SCORE||scoreB>=WIN_SCORE){
     document.getElementById("winner").textContent=scoreO>scoreB?"ORANGE WINS":"BLUE WINS";
@@ -258,22 +226,16 @@ function draw(){
   ctx.save();
   ctx.translate(canvas.width/2,canvas.height/2);
 
-  const bg=ctx.createRadialGradient(0,0,70,0,0,canvas.width);
-  bg.addColorStop(0,"#0b0b16");
-  bg.addColorStop(1,"#040407");
-  ctx.fillStyle=bg;
-  ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
-
   ctx.strokeStyle="#ffffff33";
-  ctx.lineWidth=WALL;
+  ctx.lineWidth=10;
   ctx.strokeRect(-ARENA/2,-ARENA/2,ARENA,ARENA);
 
-  ripples.forEach(r=>{
-    ctx.globalAlpha=r.a;
+  fireFX.forEach(f=>{
+    ctx.globalAlpha=f.a;
     ctx.beginPath();
-    ctx.arc(r.x,r.y,r.r,0,Math.PI*2);
-    ctx.strokeStyle="#fff";
-    ctx.stroke();
+    ctx.arc(f.x,f.y,26*(1-f.a),0,Math.PI*2);
+    ctx.fillStyle="orange";
+    ctx.fill();
   });
   ctx.globalAlpha=1;
 
@@ -281,70 +243,19 @@ function draw(){
     ctx.globalAlpha=b.a;
     ctx.beginPath();
     ctx.arc(b.x,b.y,36*(1-b.a),0,Math.PI*2);
-    ctx.fillStyle="#8b0000";
+    ctx.fillStyle="#7a0000";
     ctx.fill();
   });
   ctx.globalAlpha=1;
 
-  pickupFX.forEach(p=>{
-    ctx.globalAlpha=p.a;
-    ctx.beginPath();
-    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-    ctx.strokeStyle="#fff";
-    ctx.stroke();
-  });
-  ctx.globalAlpha=1;
-
   if(weapon){
-    ctx.save();
-    ctx.translate(weapon.x,weapon.y);
-    ctx.rotate(Date.now()*0.004);
-    ctx.shadowBlur=22;
-    ctx.strokeStyle="#fff";
-    ctx.lineWidth=2;
     ctx.beginPath();
-    ctx.rect(-14,-5,28,10);
+    ctx.arc(weapon.x,weapon.y,12,0,Math.PI*2);
+    ctx.strokeStyle="#fff";
     ctx.stroke();
-    for(let i=-12;i<=12;i+=4){
-      ctx.beginPath();
-      ctx.moveTo(i,-7);
-      ctx.lineTo(i,-14);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  if(flash>0){
-    ctx.fillStyle=`rgba(255,255,255,${flash*0.25})`;
-    ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
   }
 
   for(const b of balls){
-    for(let i=0;i<b.trail.length;i++){
-      ctx.globalAlpha=(1-i/b.trail.length)*0.25;
-      ctx.beginPath();
-      ctx.arc(b.trail[i].x,b.trail[i].y,BALL_RADIUS*(1-i/b.trail.length),0,Math.PI*2);
-      ctx.fillStyle=b.color==="orange"?"#ffb000":"#00c8ff";
-      ctx.fill();
-    }
-    ctx.globalAlpha=1;
-
-    if(b.saw){
-      ctx.save();
-      ctx.translate(b.x,b.y);
-      ctx.rotate(b.rot);
-      ctx.shadowBlur=30;
-      for(let i=0;i<22;i++){
-        const a=i*Math.PI/11;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a)*BALL_RADIUS,Math.sin(a)*BALL_RADIUS);
-        ctx.lineTo(Math.cos(a)*(BALL_RADIUS+22),Math.sin(a)*(BALL_RADIUS+22));
-        ctx.strokeStyle="#fff";
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
     if(!b.dead){
       ctx.beginPath();
       ctx.arc(b.x,b.y,BALL_RADIUS,0,Math.PI*2);
