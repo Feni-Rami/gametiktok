@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Ball Arena – Collision Fixed</title>
+<title>Ball Arena – Sound & Polish (Collision Fixed)</title>
 <style>
 html,body{
   margin:0;
@@ -25,30 +25,54 @@ canvas{display:block}
   font-weight:700;
   pointer-events:none;
 }
-.orange{color:#ffb000;text-shadow:0 0 12px #ffb000}
-.blue{color:#00c8ff;text-shadow:0 0 12px #00c8ff}
+.score{
+  transition:transform .15s ease, filter .15s ease;
+}
+.score.pulse{
+  transform:scale(1.25);
+  filter:drop-shadow(0 0 12px currentColor);
+}
+.orange{color:#ffb000}
+.blue{color:#00c8ff}
+
+.overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.82);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  font-size:36px;
+  z-index:10;
+}
+.hidden{display:none}
 </style>
 </head>
 <body>
 
 <div id="hud">
-  <div class="orange">ORANGE <span id="sO">0</span></div>
-  <div class="blue">BLUE <span id="sB">0</span></div>
+  <div class="orange score">ORANGE <span id="sO">0</span></div>
+  <div class="blue score">BLUE <span id="sB">0</span></div>
+</div>
+
+<div id="end" class="overlay hidden">
+  <div id="winner"></div>
 </div>
 
 <canvas id="c"></canvas>
 
 <script>
 /* ================= SETUP ================= */
-const canvas = document.getElementById("c");
-const ctx = canvas.getContext("2d");
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d");
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
 resize();addEventListener("resize",resize);
 
-const ARENA = 380;
-const BALL_RADIUS = 15;
-const SPEED = 3.8;
-const WIN_SCORE = 6;
+const ARENA=380;
+const BALL_RADIUS=15;
+const SPEED=3.8;
+const WIN_SCORE=6;
 
 /* ================= AUDIO ================= */
 let audioCtx,audioReady=false;
@@ -72,27 +96,43 @@ function play(freq,dur,gain){
   o.start(); o.stop(audioCtx.currentTime+dur);
 }
 
-const sndBall = () => play(260,0.035,0.06);
-const sndWall = () => play(220,0.03,0.05);
-const sndPickup = () => play(420,0.1,0.16);
-const sndKill = () => play(110,0.3,0.3);
+/* ================= FX ================= */
+let camShake=0;
+let flash=0;
+let ripples=[];
 
 /* ================= STATE ================= */
 let balls=[];
 let chainsaw=null;
 let scoreO=0, scoreB=0;
+let running=true;
+
+/* ================= UI ================= */
+const sO=document.getElementById("sO");
+const sB=document.getElementById("sB");
+const scoreEls=document.querySelectorAll(".score");
+
+function pulseScore(isOrange){
+  const el=isOrange?scoreEls[0]:scoreEls[1];
+  el.classList.add("pulse");
+  setTimeout(()=>el.classList.remove("pulse"),160);
+}
+function updateScore(){
+  sO.textContent=scoreO;
+  sB.textContent=scoreB;
+}
 
 /* ================= BALL ================= */
 function spawnBall(side){
-  const angle = Math.random()*Math.PI*2;
   return{
     x:side==="left"?-140:140,
     y:(Math.random()*90-45),
-    vx:Math.cos(angle)*SPEED*(side==="left"?1:-1),
-    vy:Math.sin(angle)*SPEED,
+    vx:side==="left"?SPEED:-SPEED,
+    vy:(Math.random()*2-1)*SPEED,
     color:side==="left"?"orange":"blue",
     saw:false,
     sawTime:0,
+    rot:0,
     dead:false,
     death:0,
     trail:[]
@@ -112,73 +152,85 @@ function spawnChainsaw(){
 
 /* ================= UPDATE ================= */
 function update(){
+  if(!running) return;
+
   if(!chainsaw && Math.random()<0.01) spawnChainsaw();
   if(chainsaw && --chainsaw.time<=0) chainsaw=null;
 
-  /* MOVE */
-  for(const b of balls){
-    if(b.dead){
-      b.death+=0.06;
-      if(b.death>=1){
-        const side=b.color==="orange"?"left":"right";
-        balls[balls.indexOf(b)]=spawnBall(side);
+  const a=balls[0], b=balls[1];
+
+  for(const ball of balls){
+    if(ball.dead){
+      ball.death+=0.06;
+      if(ball.death>=1){
+        const side=ball.color==="orange"?"left":"right";
+        balls[balls.indexOf(ball)]=spawnBall(side);
       }
       continue;
     }
 
-    b.x+=b.vx;
-    b.y+=b.vy;
+    ball.trail.unshift({x:ball.x,y:ball.y});
+    if(ball.trail.length>18) ball.trail.pop();
 
-    /* WALL COLLISION */
-    if(Math.abs(b.x)>ARENA/2-BALL_RADIUS){
-      b.x = Math.sign(b.x)*(ARENA/2-BALL_RADIUS);
-      b.vx*=-1;
-      sndWall();
+    ball.x+=ball.vx;
+    ball.y+=ball.vy;
+
+    /* Mur */
+    if(Math.abs(ball.x)>ARENA/2-BALL_RADIUS){
+      ball.x=Math.sign(ball.x)*(ARENA/2-BALL_RADIUS);
+      ball.vx*=-1;
+      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
+      play(260,0.03,0.04);
     }
-    if(Math.abs(b.y)>ARENA/2-BALL_RADIUS){
-      b.y = Math.sign(b.y)*(ARENA/2-BALL_RADIUS);
-      b.vy*=-1;
-      sndWall();
+    if(Math.abs(ball.y)>ARENA/2-BALL_RADIUS){
+      ball.y=Math.sign(ball.y)*(ARENA/2-BALL_RADIUS);
+      ball.vy*=-1;
+      ripples.push({x:ball.x,y:ball.y,r:0,a:1});
+      play(260,0.03,0.04);
     }
 
-    if(b.saw){
-      b.sawTime--;
-      if(b.sawTime<=0) b.saw=false;
+    if(ball.saw){
+      ball.sawTime--;
+      ball.rot+=0.45;
+      if(ball.sawTime<=0) ball.saw=false;
     }
   }
 
-  /* BALL ↔ BALL COLLISION (ROBUST) */
-  const a=balls[0], b=balls[1];
+  /* ================= COLLISION FIXÉE ================= */
   if(!a.dead && !b.dead){
     const dx=b.x-a.x;
     const dy=b.y-a.y;
-    const d=Math.hypot(dx,dy);
+    const dist=Math.hypot(dx,dy);
     const minDist=BALL_RADIUS*2;
 
-    if(d<minDist){
-      const nx=dx/d;
-      const ny=dy/d;
+    if(dist<minDist){
+      const nx=dx/dist;
+      const ny=dy/dist;
 
-      /* separation forcée */
-      const overlap=minDist-d;
+      /* séparation forcée */
+      const overlap=minDist-dist;
       a.x-=nx*overlap/2; a.y-=ny*overlap/2;
       b.x+=nx*overlap/2; b.y+=ny*overlap/2;
 
-      /* collision logique */
+      /* logique armes */
       if(a.saw && b.saw){
         a.saw=b.saw=false;
-        sndBall();
+        play(300,0.05,0.08);
       }
       else if(a.saw && !b.saw){
         scoreO++; b.dead=true; a.saw=false;
-        sndKill();
+        flash=1; camShake=10;
+        play(110,0.3,0.3);
+        pulseScore(true);
       }
       else if(b.saw && !a.saw){
         scoreB++; a.dead=true; b.saw=false;
-        sndKill();
+        flash=1; camShake=10;
+        play(110,0.3,0.3);
+        pulseScore(false);
       }
       else{
-        /* rebond élastique */
+        /* rebond élastique réel */
         const dvx=a.vx-b.vx;
         const dvy=a.vy-b.vy;
         const impact=dvx*nx+dvy*ny;
@@ -188,27 +240,39 @@ function update(){
           b.vx+=impact*nx;
           b.vy+=impact*ny;
         }
-        sndBall();
+        play(260,0.035,0.06);
       }
+
+      updateScore();
     }
   }
 
-  /* PICKUP */
+  /* Pickup */
   if(chainsaw && !chainsaw.picked){
-    for(const b of balls){
-      if(!b.dead && Math.hypot(b.x-chainsaw.x,b.y-chainsaw.y)<BALL_RADIUS+12){
+    for(const ball of balls){
+      if(!ball.dead && Math.hypot(ball.x-chainsaw.x,ball.y-chainsaw.y)<BALL_RADIUS+12){
         chainsaw.picked=true;
-        b.saw=true;
-        b.sawTime=420;
+        ball.saw=true;
+        ball.sawTime=420;
         chainsaw=null;
-        sndPickup();
+        play(420,0.1,0.16);
         break;
       }
     }
   }
 
-  document.getElementById("sO").textContent=scoreO;
-  document.getElementById("sB").textContent=scoreB;
+  camShake*=0.85;
+  flash*=0.85;
+
+  ripples.forEach(r=>{r.r+=3; r.a-=0.04});
+  ripples=ripples.filter(r=>r.a>0);
+
+  if(scoreO>=WIN_SCORE||scoreB>=WIN_SCORE){
+    document.getElementById("winner").textContent =
+      scoreO>scoreB?"ORANGE WINS":"BLUE WINS";
+    document.getElementById("end").classList.remove("hidden");
+    running=false;
+  }
 }
 
 /* ================= DRAW ================= */
@@ -216,40 +280,60 @@ function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
   ctx.save();
   ctx.translate(canvas.width/2,canvas.height/2);
+  ctx.translate((Math.random()-.5)*camShake,(Math.random()-.5)*camShake);
 
-  /* BG */
-  const bg=ctx.createRadialGradient(0,0,60,0,0,canvas.width);
+  const bg=ctx.createRadialGradient(0,0,50,0,0,canvas.width);
   bg.addColorStop(0,"#0b0b16");
   bg.addColorStop(1,"#040407");
   ctx.fillStyle=bg;
   ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
 
-  /* Arena */
   ctx.strokeStyle="#ffffff22";
   ctx.lineWidth=4;
   ctx.strokeRect(-ARENA/2,-ARENA/2,ARENA,ARENA);
 
-  /* Chainsaw */
-  if(chainsaw){
-    ctx.save();
-    ctx.translate(chainsaw.x,chainsaw.y);
-    ctx.rotate(Date.now()*0.01);
-    ctx.strokeStyle="#fff";
-    ctx.shadowColor="#fff";
-    ctx.shadowBlur=18;
+  for(const r of ripples){
+    ctx.globalAlpha=r.a;
     ctx.beginPath();
-    ctx.arc(0,0,9,0,Math.PI*2);
-    for(let i=0;i<18;i++){
-      const a=i*Math.PI/9;
-      ctx.moveTo(Math.cos(a)*9,Math.sin(a)*9);
-      ctx.lineTo(Math.cos(a)*16,Math.sin(a)*16);
-    }
+    ctx.arc(r.x,r.y,r.r,0,Math.PI*2);
+    ctx.strokeStyle="#fff";
     ctx.stroke();
-    ctx.restore();
+  }
+  ctx.globalAlpha=1;
+
+  if(flash>0){
+    ctx.fillStyle=`rgba(255,255,255,${flash*0.25})`;
+    ctx.fillRect(-canvas.width,-canvas.height,canvas.width*2,canvas.height*2);
   }
 
-  /* Balls */
   for(const b of balls){
+    for(let i=0;i<b.trail.length;i++){
+      ctx.globalAlpha=(1-i/b.trail.length)*0.25;
+      ctx.beginPath();
+      ctx.arc(b.trail[i].x,b.trail[i].y,BALL_RADIUS*(1-i/b.trail.length),0,Math.PI*2);
+      ctx.fillStyle=b.color==="orange"?"#ffb000":"#00c8ff";
+      ctx.fill();
+    }
+    ctx.globalAlpha=1;
+
+    if(b.saw && !b.dead){
+      ctx.save();
+      ctx.translate(b.x,b.y);
+      ctx.rotate(b.rot);
+      ctx.shadowColor="#fff";
+      ctx.shadowBlur=22;
+      for(let i=0;i<20;i++){
+        const a=i*Math.PI/10;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a)*BALL_RADIUS,Math.sin(a)*BALL_RADIUS);
+        ctx.lineTo(Math.cos(a)*(BALL_RADIUS+18),Math.sin(a)*(BALL_RADIUS+18));
+        ctx.strokeStyle="#fff";
+        ctx.lineWidth=2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     let r=BALL_RADIUS;
     if(b.dead) r*=1-b.death;
     if(r>0){
@@ -272,6 +356,7 @@ function draw(){
 </script>
 </body>
 </html>
+
 
 
 <!-- <!DOCTYPE html>
